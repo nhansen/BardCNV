@@ -182,6 +182,30 @@ void dbaum_dsigpi(ModelParams *model_params, Observation *observations, double *
     *derivative = sum;
 }
 
+void dbaum_dtransprob(ModelParams *model_params, Observation *observations, double ***xi, double *derivative) {
+
+    int i, j, t, istate, jstate;
+    double sum;
+
+    sum = 0.0;
+    for (t = 0; t < model_params->T - 1; t++) {
+        for (i = 0; i < 2*model_params->N; i++) {
+            for (j = 0; j < 2*model_params->N; j++) {
+                istate = (i >= model_params->N) ? i - model_params->N : i;
+                jstate = (j >= model_params->N) ? j - model_params->N : j;
+                if (istate == jstate) {
+                    sum += xi[t][i][j] * (1.0 - model_params->N) /
+                          (0.5 - (model_params->N - 1.0) * model_params->trans_prob);
+                }
+                else {
+                    sum += xi[t][i][j] / model_params->trans_prob;
+                }
+            }
+        }
+    }
+    *derivative = sum;
+}
+
 void exp_log_prob(ModelParams *model_params, Observation *observations, double **gamma, double *elogp) {
 
     int i, j, t, minor, total;
@@ -215,5 +239,6 @@ void exp_log_prob(ModelParams *model_params, Observation *observations, double *
         }
     }
 
+    /* fprintf(stderr, "Done\n"); */
     *elogp = sum;
 }

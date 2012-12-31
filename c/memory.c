@@ -30,8 +30,16 @@ double **alloc_double_matrix(int rows, int cols) {
     double **matrix;
 
     matrix = (double **)malloc(sizeof(double *) * rows); 
+    if (!matrix) {
+        fprintf(stderr, "Couldn't allocate memory!\n");
+        exit(1);
+    }
     for (i = 0; i < rows; i++) {
         matrix[i] = (double *)malloc(sizeof(double) * cols);
+        if (!matrix[i]) {
+            fprintf(stderr, "Couldn't allocate memory!\n");
+            exit(1);
+        }
     }
 
     return matrix;
@@ -46,7 +54,6 @@ void free_double_matrix(double **matrix, int rows) {
     }
 
     free(matrix);
-
 }
 
 double ***alloc_double_tensor(int rows, int cols, int levels) {
@@ -55,10 +62,22 @@ double ***alloc_double_tensor(int rows, int cols, int levels) {
     double ***tensor;
 
     tensor = (double ***)malloc(sizeof(double **) * rows); 
+    if (!tensor) {
+        fprintf(stderr, "Couldn't allocate memory!\n");
+        exit(1);
+    }
     for (i = 0; i < rows; i++) {
         *(tensor + i) = (double **)malloc(sizeof(double *) * cols);
+        if (!tensor[i]) {
+            fprintf(stderr, "Couldn't allocate memory!\n");
+            exit(1);
+        }
         for (j = 0; j < cols; j++) {
             (*(tensor + i))[j] = (double *)malloc(sizeof(double) * levels);
+            if (!tensor[i][j]) {
+                fprintf(stderr, "Couldn't allocate memory!\n");
+                exit(1);
+            }
         }
     }
 
@@ -85,9 +104,31 @@ double *alloc_double_vector(int entries) {
     double *vector;
 
     vector = (double *)malloc(sizeof(double) * entries);
+    if (!vector) {
+        fprintf(stderr, "Couldn't allocate memory!\n");
+        exit(1);
+    }
+    return vector;
 }
 
 void free_double_vector(double *vector) {
+
+    free(vector);
+}
+
+int *alloc_int_vector(int entries) {
+
+    int *vector;
+
+    vector = (int *)malloc(sizeof(int) * entries);
+    if (!vector) {
+        fprintf(stderr, "Couldn't allocate memory!\n");
+        exit(1);
+    }
+    return vector;
+}
+
+void free_int_vector(int *vector) {
 
     free(vector);
 }
@@ -98,8 +139,16 @@ int **alloc_int_matrix(int rows, int cols) {
     int **matrix;
 
     matrix = (int **)malloc(sizeof(int *) * rows); 
+    if (!matrix) {
+        fprintf(stderr, "Couldn't allocate memory!\n");
+        exit(1);
+    }
     for (i = 0; i < rows; i++) {
         *(matrix + i) = (int *)malloc(sizeof(int) * cols);
+        if (!matrix[i]) {
+            fprintf(stderr, "Couldn't allocate memory!\n");
+            exit(1);
+        }
     }
 
     return matrix;
@@ -116,3 +165,64 @@ void free_int_matrix(int **matrix, int rows) {
     free(matrix);
 }
 
+void copy_params(ModelParams *from_model_params, ModelParams **to_model_params) {
+    int i, j, noStates, newminor, newtotal;
+    StateData *stateptr;
+
+    /* allocate memory for model parameters */
+    *to_model_params = (ModelParams *)malloc(sizeof(ModelParams));
+    if (!to_model_params) {
+        fprintf(stderr, "Couldn't allocate memory!\n");
+        exit(1);
+    }
+    (*to_model_params)->T = from_model_params->T;
+    (*to_model_params)->N = from_model_params->N;
+    noStates = from_model_params->N;
+    (*to_model_params)->trans_prob = from_model_params->trans_prob;
+    (*to_model_params)->mu_ratio = from_model_params->mu_ratio;
+    (*to_model_params)->sigma_ratio = from_model_params->sigma_ratio;
+    (*to_model_params)->sigma_pi = from_model_params->sigma_pi;
+    (*to_model_params)->rho_contam = from_model_params->rho_contam;
+
+    /* allocate space for state transitions, state parameters */
+    (*to_model_params)->pi = alloc_double_vector(noStates);
+    for (i=0; i<noStates; i++) {
+        /* fprintf(stderr, "Copying from %lf\n", *(from_model_params->pi + i)); */
+        *((*to_model_params)->pi + i) = *(from_model_params->pi + i);
+    }
+    /* fprintf(stderr, "Populated pi vector\n"); */
+
+    /* fprintf(stderr, "Allocating %d by %d matrix\n", 2*noStates, 2*noStates); */
+    (*to_model_params)->a = alloc_double_matrix(2*noStates, 2*noStates);
+
+    for (i = 0; i < 2*noStates; i++) {
+        /* transitions */
+        for (j = 0; j < 2*noStates; j++) {
+            (*to_model_params)->a[i][j] = from_model_params->a[i][j];
+        }
+    }
+    (*to_model_params)->states = (StateData *)malloc(sizeof(StateData)*noStates);
+    if (!(*to_model_params)->states) {
+        fprintf(stderr, "Couldn't allocate memory!\n");
+        exit(1);
+    }
+
+    stateptr = (*to_model_params)->states;
+        
+    for (i=0; i<noStates; i++) {
+        stateptr->minor = (&(from_model_params->states[i]))->minor;
+        stateptr->total = (&(from_model_params->states[i]))->total;
+        stateptr++;
+    }
+    /* check */
+    for (i=0; i<noStates; i++) {
+        newminor = (&((*to_model_params)->states[i]))->minor;
+        if (newminor != (&(from_model_params->states[i]))->minor) {
+            fprintf(stderr, "Unequal minor\n");
+        }
+        newtotal = (&((*to_model_params)->states[i]))->total;
+        if (newtotal != (&(from_model_params->states[i]))->total) {
+            fprintf(stderr, "Unequal total\n");
+        }
+    }
+}

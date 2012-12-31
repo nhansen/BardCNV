@@ -32,29 +32,16 @@ extern Params *parameters;
 
 void calc_alphas(ModelParams *model_params, Observation *observations, double **alpha, double **eprob, double *mll) {
 
-    int i, j, t, minor, total;
-    double norm, sum, gaussnorm, exp_pi, exp_picontam, rho_contam;
-    StateData *state;
+    int i, j, t;
+    double norm, sum;
 
-    /* extra factor for normalization of Gaussian densities */
-    gaussnorm = 1.0/(4.0*3.14159*model_params->sigma_pi*model_params->sigma_ratio);
-
-    rho_contam = model_params->rho_contam;
-    
     /* Initialization */
     norm = 0.0;
     for (i = 0; i < model_params->N; i++) {
-        state = &((model_params->states)[i]);
-        minor = state->minor;
-        total = state->total;
 
-        exp_pi = (total==0) ? 0.5 : 1.0*minor/total;
-        exp_picontam = rho_contam * (0.5 - exp_pi) + exp_pi;
-
-        alpha[0][i] = model_params->pi[i] * eprob[0][i];
-        alpha[0][i + model_params->N] = model_params->pi[i] * eprob[0][i + model_params->N];
+        alpha[0][i] = 0.5*model_params->pi[i] * eprob[0][i];
+        alpha[0][i + model_params->N] = 0.5*model_params->pi[i] * eprob[0][i + model_params->N];
         norm += alpha[0][i] + alpha[0][i + model_params->N];
-        /* fprintf(stderr, "Initialization state %d eprob is %lf, %lf\n", i, eprob[0][i], eprob[0][i + model_params->N]); */
     }
 
     if (norm <= 0.0) {
@@ -72,17 +59,13 @@ void calc_alphas(ModelParams *model_params, Observation *observations, double **
     /* Induction */
     for (t = 0; t < model_params->T - 1; t++) {
         norm = 0.0;
-        for (j = 0; j < model_params->N; j++) {
-            state = &((model_params->states)[j]);
-            minor = state->minor;
+        for (j = 0; j < 2*model_params->N; j++) {
             sum = 0.0;
-            for (i = 0; i < model_params->N; i++) {
-                sum += alpha[t][i] * model_params->a[i][j]/2.0; 
-                sum += alpha[t][i + model_params->N] * model_params->a[i][j]/2.0; 
+            for (i = 0; i < 2*model_params->N; i++) {
+                sum += alpha[t][i] * model_params->a[i][j];
             }
             alpha[t + 1][j] = sum * eprob[t+1][j];
-            alpha[t + 1][j + model_params->N] = sum * eprob[t+1][j + model_params->N];
-            norm += alpha[t + 1][j] + alpha[t + 1][j + model_params->N];
+            norm += alpha[t + 1][j];
         }
         if (norm <= 0.0) {
             fprintf(stderr, "Underflow in alphas at t=%d\n", t);

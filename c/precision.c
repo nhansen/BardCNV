@@ -39,10 +39,8 @@ void small_double_check(double *minexparg)
 
         /* fprintf(stderr, "%d %.10g %.10g\n", checkno, expval, logval); */
         if (logval != (1.0*checkno)) {
-            /* fprintf(stderr, "Unequal!\n"); */
             *minexparg = 1.0*(checkno + 8); /* Adding 8 just to be safe */
             return;
         }
     }
 }
-

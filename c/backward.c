@@ -31,15 +31,8 @@ extern Params *parameters;
 /* "backward" procedure */
 
 void calc_betas(ModelParams *model_params, Observation *observations, double **beta, double **eprob) {
-    int i, istate, j, jstate, t, minor, total;
-    double norm, sum, sig_ind_factor;
-    double gaussnorm, exp_pi, exp_picontam, rho_contam;
-    StateData *state;
-
-    /* extra factor for normalization of Gaussian densities */
-    gaussnorm = 1.0/(4.0*3.14159*model_params->sigma_pi*model_params->sigma_ratio);
-
-    rho_contam = model_params->rho_contam;
+    int i, j, t;
+    double norm, sum;
 
     /* Initialization */
     for (i = 0; i < 2*model_params->N; i++) {
@@ -50,11 +43,9 @@ void calc_betas(ModelParams *model_params, Observation *observations, double **b
     for (t = model_params->T - 2; t >= 0; t--) {
         norm = 0.0;
         for (i = 0; i < 2*model_params->N; i++) {
-            istate = (i >= model_params->N) ? i - model_params->N : i;
             sum = 0.0;
-            for (j = 0; j < model_params->N; j++) {
-                sum += model_params->a[istate][j]/2.0 * (beta[t+1][j]*eprob[t+1][j]
-                     + beta[t+1][j + model_params->N]*eprob[t+1][j + model_params->N]);
+            for (j = 0; j < 2*model_params->N; j++) {
+                sum += model_params->a[i][j] * beta[t+1][j] * eprob[t+1][j];
             } 
             beta[t][i] = sum;
             norm += sum;
@@ -65,4 +56,3 @@ void calc_betas(ModelParams *model_params, Observation *observations, double **b
     }
     /* fprintf(stderr, "Done with backward\n"); */
 }
-

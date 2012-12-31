@@ -50,6 +50,10 @@ void read_observations(char *filename, ModelParams **model_params, Observation *
         if (fscanf(fc, "%s", wcstring) == 1) {
             noLines = atoi(wcstring);
             *observations = (Observation *)malloc(sizeof(Observation)*noLines);
+            if (!*observations) {
+                fprintf(stderr, "Couldn't allocate memory!\n");
+                exit(1);
+            } 
         }
         else {
             fprintf(stderr, "Error assessing size of file %s.\n", filename);
@@ -68,6 +72,10 @@ void read_observations(char *filename, ModelParams **model_params, Observation *
     obsNo = 0;
     while (fscanf(fp, "%s\t%d\t%lf\t%lf", chr, &pos, &ratio, &pi) == 4) {
         chrptr = (char *)malloc(sizeof(char)*(strlen(chr) + 1));
+        if (!chrptr) {
+            fprintf(stderr, "Couldn't allocate memory!\n");
+            exit(1);
+        }
         strcpy(chrptr, chr);
         thisObs = *observations + obsNo;
         if (ratio == 0.00) {
@@ -85,11 +93,10 @@ void read_observations(char *filename, ModelParams **model_params, Observation *
 
 void read_model(char *filename, ModelParams **model_params)
 {
-    int noStates, i, j;
+    int noStates, i, j, istate, jstate;
     int minor, total;
     double statepi;
     FILE *fp;
-    double *piptr;
     StateData *stateptr;
     double *transProb;
     char keyword[1000];
@@ -97,7 +104,12 @@ void read_model(char *filename, ModelParams **model_params)
 
     /* allocate memory for model parameters */
     *model_params = (ModelParams *)malloc(sizeof(ModelParams));
+    if (!model_params) {
+        fprintf(stderr, "Couldn't allocate memory!\n");
+        exit(1);
+    }
     (*model_params)->T = 0;
+
     /* Open observation file and read observations into Observation array */
 
     if ((fp = fopen(filename, "r")) == NULL) {
@@ -107,20 +119,17 @@ void read_model(char *filename, ModelParams **model_params)
 
     if (fscanf(fp, "N= %d", &noStates) == 1) {
         (*model_params)->N = noStates;
-        (*model_params)->pi = (double *)malloc(sizeof(double)*noStates);
+        (*model_params)->pi = alloc_double_vector(noStates);
         (*model_params)->states = (StateData *)malloc(sizeof(StateData)*noStates);
-        /* allocate space for state transitions */
-        (*model_params)->a = (double **)malloc(sizeof(double *)*noStates);
-        for (i=0; i<noStates; i++) {
-            *((*model_params)->a + i) = (double *)malloc(sizeof(double)*noStates); 
+        if (!(*model_params)->states) {
+            fprintf(stderr, "Couldn't allocate memory!\n");
+            exit(1);
         }
-        piptr = (*model_params)->pi;
         stateptr = (*model_params)->states;
         
         for (i=0; i<noStates; i++) {
-            if (fscanf(fp, "%d %d %lf", &(stateptr->minor), &(stateptr->total), piptr) == 3) {
-                fprintf(stderr, "State %d %d %lf\n", stateptr->minor, stateptr->total, *piptr);
-                piptr++;
+            if (fscanf(fp, "%d %d %lf", &(stateptr->minor), &(stateptr->total), &(*((*model_params)->pi + i))) == 3) {
+                fprintf(stderr, "State %d %d %lf\n", stateptr->minor, stateptr->total, (*model_params)->pi[i]);
                 stateptr++;
             }
             else {
@@ -128,12 +137,13 @@ void read_model(char *filename, ModelParams **model_params)
                 exit(1);
             }
         }
+        /* allocate space for state transitions */
+        (*model_params)->a = alloc_double_matrix(2*noStates, 2*noStates);
         fscanf(fp, " %s ", keyword);
-        /* if (fscanf(fp, " Transitions ") == 0) { */
-        if (strcmp(keyword, "Transitions") == 0) {
-            for (i=0; i<noStates; i++) {
+        /* if (strcmp(keyword, "Transitions") == 0) {
+            for (i=0; i < 2*noStates; i++) {
                 transProb = (*model_params)->a[i];
-                for (j=0; j<noStates; j++) {
+                for (j=0; j < 2*noStates; j++) {
                     if (fscanf(fp, "%lf ", transProb) == 1) {
                         transProb++;
                     }
@@ -144,17 +154,20 @@ void read_model(char *filename, ModelParams **model_params)
                 }
             }
         }
-        else if (strcmp(keyword, "Transprob=") == 0) {
-            if (fscanf(fp, " %lf ", &offdiag)==1) {
-                fprintf(stderr, "Transprob is %lf\n", offdiag);
-                for (i=0; i<noStates; i++) {
+        else */
+        if (strcmp(keyword, "Transprob=") == 0) {
+            if (fscanf(fp, " %lf ", &((*model_params)->trans_prob))==1) {
+                fprintf(stderr, "Transprob is %g\n", (*model_params)->trans_prob);
+                for (i=0; i < 2*noStates; i++) {
                     transProb = (*model_params)->a[i];
-                    for (j=0; j<noStates; j++) {
-                        if (i != j) {
-                            *(transProb++) = offdiag;
+                    for (j=0; j < 2*noStates; j++) {
+                        istate = (i >= noStates) ? i - noStates : i;
+                        jstate = (j >= noStates) ? j - noStates : j;
+                        if (istate != jstate) {
+                            *(transProb++) = (*model_params)->trans_prob;
                         }
                         else {
-                            *(transProb++) = 1.0 - offdiag * (noStates - 1);
+                            *(transProb++) = 0.5 - (*model_params)->trans_prob * (noStates - 1.0);
                         }
                     }
                 }
@@ -192,3 +205,4 @@ void read_model(char *filename, ModelParams **model_params)
     }
     fclose(fp);
 }
+

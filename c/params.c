@@ -37,9 +37,10 @@ void get_params(argc, argv)
     parameters = (Params *) malloc(sizeof(Params));
 
     /* defaults */
-    parameters->min = 0.0;
-    parameters->max = 0.0;
-    parameters->nobins = 100;
+    parameters->min = 0.0; /* for plotting log likelihoods */
+    parameters->max = 0.0; /* for plotting log likelihoods */
+    parameters->nobins = 100; /* for plotting log likelihoods */
+    parameters->fixtrans = 0; /* option to skip optimization of transition probs */
 
     if (argc >= 1) {
         parameters->program = (char *) malloc((strlen(argv[1]) + 1) * sizeof(char));
@@ -60,54 +61,17 @@ void get_params(argc, argv)
         }
         if (!strcmp(argv[i], "-min")) {
             parameters->min = atof(argv[++i]);
-            fprintf(stderr, "Parsed min value %lf\n", parameters->min);
+            fprintf(stderr, "Parsed Min value %lf\n", parameters->min);
         }
         if (!strcmp(argv[i], "-max")) {
             parameters->max = atof(argv[++i]);
-            fprintf(stderr, "Parsed max value %lf\n", parameters->max);
+            fprintf(stderr, "Parsed Max value %lf\n", parameters->max);
         }
         if (!strcmp(argv[i], "-nobins")) {
             parameters->nobins = atoi(argv[++i]);
         }
-    }
-}
-
-void copy_params(ModelParams *from_model_params, ModelParams **to_model_params) {
-    int i, j, noStates;
-    double *piptr, **transProb;
-    StateData *stateptr;
-
-    /* allocate memory for model parameters */
-    *to_model_params = (ModelParams *)malloc(sizeof(ModelParams));
-    (*to_model_params)->T = from_model_params->T;
-    noStates = from_model_params->N;
-    (*to_model_params)->N = noStates;
-    (*to_model_params)->pi = (double *)malloc(sizeof(double)*noStates);
-    (*to_model_params)->states = (StateData *)malloc(sizeof(StateData)*noStates);
-
-    /* allocate space for state transitions */
-    (*to_model_params)->a = (double **)malloc(sizeof(double *)*noStates);
-    for (i=0; i<noStates; i++) {
-        *((*to_model_params)->a + i) = (double *)malloc(sizeof(double)*noStates); 
-    }
-    piptr = (*to_model_params)->pi;
-    stateptr = (*to_model_params)->states;
-        
-    for (i=0; i<noStates; i++) {
-        *piptr = (from_model_params->pi)[i];
-        piptr++;
-        stateptr->minor = (&(from_model_params->states)[i])->minor;
-        stateptr->total = (&(from_model_params->states)[i])->total;
-        stateptr++;
-
-        /* transitions */
-        transProb = (*to_model_params)->a;
-        for (j=0; j<noStates; j++) {
-            transProb[i][j] = (from_model_params->a)[i][j];
+        if (!strcmp(argv[i], "-fixtrans")) {
+            parameters->fixtrans = 1;
         }
     }
-    (*to_model_params)->mu_ratio = from_model_params->mu_ratio;
-    (*to_model_params)->sigma_ratio = from_model_params->sigma_ratio;
-    (*to_model_params)->sigma_pi = from_model_params->sigma_pi;
-    (*to_model_params)->rho_contam = from_model_params->rho_contam;
 }

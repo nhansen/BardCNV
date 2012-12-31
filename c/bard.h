@@ -30,6 +30,7 @@ typedef struct params {
     double min, max;
     double minexparg;
     long nobins;
+    int fixtrans;
 
 } Params;
 
@@ -43,6 +44,7 @@ typedef struct modelparams {
     int N;
     StateData *states;
     long T;
+    double trans_prob;
     double **a;
     double *pi;
     double mu_ratio;
@@ -78,6 +80,7 @@ void dbaum_dmuratio(ModelParams *model_params, Observation *observations, double
 void plot_mu_prob(ModelParams *model_params, Observation *observations);
 void dbaum_dsigratio(ModelParams *model_params, Observation *observations, double **gamma, double *derivative);
 void dbaum_dsigpi(ModelParams *model_params, Observation *observations, double **gamma, double *derivative);
+void dbaum_dtransprob(ModelParams *model_params, Observation *observations, double ***xi, double *derivative);
 void exp_log_prob(ModelParams *model_params, Observation *observations, double **gamma, double *elogp);
 void copy_params(ModelParams *from_model_params, ModelParams **to_model_params);
 void small_double_check(double *minexparg);
@@ -89,3 +92,5 @@ void free_double_tensor(double ***tensor, int rows, int cols);
 void free_double_matrix(double **matrix, int rows);
 void free_double_vector(double *vector);
 void free_int_matrix(int **matrix, int rows);
+int *alloc_int_vector(int entries);
+void free_int_vector(int *vector);

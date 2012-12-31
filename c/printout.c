@@ -59,11 +59,11 @@ void write_model(ModelParams *model_params)
     fprintf(stdout, "N= %d\n", model_params->N);
     stateptr = model_params->states;
     for (i=0; i<model_params->N; i++) {
-        fprintf(stdout, "%d %d %lf\n", stateptr->minor, stateptr->total, model_params->pi[i]);
+        fprintf(stdout, "%d %d %g\n", stateptr->minor, stateptr->total, model_params->pi[i]);
         stateptr++;
     }
 
-    fprintf(stdout, "Transitions\n");
+    /* fprintf(stdout, "Transitions\n");
     for (i=0; i<model_params->N; i++) {
         for (j=0; j<model_params->N; j++) {
             fprintf(stdout, "%lf", model_params->a[i][j]);
@@ -74,7 +74,8 @@ void write_model(ModelParams *model_params)
                 fprintf(stdout, " ");
             }
         }
-    }
+    } */
+    fprintf(stdout, "Transprob= %g\n", model_params->trans_prob); 
     fprintf(stdout, "mu_ratio= %lf\n", model_params->mu_ratio); 
     fprintf(stdout, "sigma_ratio= %lf\n", model_params->sigma_ratio); 
     fprintf(stdout, "rho_contam= %lf\n", model_params->rho_contam); 

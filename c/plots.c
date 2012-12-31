@@ -41,21 +41,18 @@ void plot_mu_prob(ModelParams *model_params, Observation *observations)
     maxratio = (parameters->max != 0.0) ? parameters->max : 2.0;
     nopoints = parameters->nobins;
 
-    eprob = (double **)malloc(sizeof(double *)*model_params->T);
-    alpha = (double **)malloc(sizeof(double *)*model_params->T);
+    eprob = alloc_double_matrix(model_params->T, 2*model_params->N);
+    alpha = alloc_double_matrix(model_params->T, 2*model_params->N);
 
-    for (i = 0; i < model_params->T; i++) {
-        *(eprob + i) = (double *)malloc(sizeof(double)*2*model_params->N);
-        *(alpha + i) = (double *)malloc(sizeof(double)*2*model_params->N);
-    }
-
-    fprintf(stderr, "mu from %lf to %lf, %d bins\n", minratio, maxratio, nopoints);
+    fprintf(stderr, "muratio from %lf to %lf, %d bins\n", minratio, maxratio, nopoints);
     for (i = 1; i < nopoints; i++) {
         model_params->mu_ratio = minratio + i*(maxratio - minratio)/(nopoints*1.0);
-        fprintf(stderr, "Calculating probability for mu=%lf\n", model_params->mu_ratio);
+        fprintf(stderr, "Calculating probability for muratio=%lf\n", model_params->mu_ratio);
         calc_eprobs(model_params, observations, eprob);
         calc_alphas(model_params, observations, alpha, eprob, &mll);
         fprintf(stdout, "%lf\t%lf\n", model_params->mu_ratio, mll);
     }
-}
 
+    free_double_matrix(eprob, model_params->T);
+    free_double_matrix(alpha, model_params->T);
+}

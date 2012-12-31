@@ -37,14 +37,12 @@ double run_baumwelch(ModelParams **model_params, Observation *observations)
     double **beta; /* "backward" variables (see Rabiner) */
     double **gamma; /* single-site state probabilities */
     double ***xi; /* two-site state probabilities */
-    double **xiptr;
     double initial_mll, final_mll, mll_diff, elogp, elogpnew;
     double norm, sum, mu_ratio_num, mu_ratio_den, random_number;
     double explow, exphigh, difflow, diffhigh;
     double total_pialt_num, total_pialt_den, addend, eff_cn;
     double sig_ratio_num, sig_ratio_den, small_sig_ratio_num, small_sig_ratio_den;
-    double derivative, last_mu_ratio, last_sig_ratio, last_sig_pi, rho_contam;
-    double total_trans;
+    double derivative, last_mu_ratio, last_sig_ratio, last_sig_pi, rho_contam, new_diag;
    
     StateData *thisstate; 
     int i, j, istate, jstate, minor, total, bt_iterations;
@@ -57,15 +55,19 @@ double run_baumwelch(ModelParams **model_params, Observation *observations)
     beta = alloc_double_matrix((*model_params)->T, 2*(*model_params)->N);
     gamma = alloc_double_matrix((*model_params)->T, 2*(*model_params)->N);
 
-    xi = alloc_double_tensor((*model_params)->T, 2*(*model_params)->N,
+    if (parameters->fixtrans == 0) {
+        xi = alloc_double_tensor((*model_params)->T, 2*(*model_params)->N,
                              2*(*model_params)->N);
+    }
 
     calc_eprobs(*model_params, observations, eprob);
     calc_alphas(*model_params, observations, alpha, eprob, &final_mll);
     initial_mll = (1.0 - 2.0*TOL) * final_mll; /* to assure at least one iteration */
     calc_betas(*model_params, observations, beta, eprob);
     calc_gammas(*model_params, alpha, beta, gamma, eprob);
-    calc_xis(*model_params, alpha, beta, xi, eprob);
+    if (parameters->fixtrans == 0) {
+        calc_xis(*model_params, alpha, beta, xi, eprob);
+    }
 
     mll_diff = final_mll - initial_mll;
     bt_iterations = 0; 
@@ -83,8 +85,9 @@ double run_baumwelch(ModelParams **model_params, Observation *observations)
         /* re-estimate */
         /* initial probabilities */
         for (i = 0; i < (*model_params)->N; i++) {
-            (*model_params)->pi[i] = 0.0001/(*model_params)->N + 0.9999*(gamma[0][i] + 
-                                            gamma[0][i + (*model_params)->N]);
+            /* (*model_params)->pi[i] = 0.0001/(*model_params)->N + 0.9999*(gamma[0][i] + 
+                                            gamma[0][i + (*model_params)->N]); */
+            (*model_params)->pi[i] = gamma[0][i] + gamma[0][i + (*model_params)->N];
             
         }
 
@@ -94,23 +97,22 @@ double run_baumwelch(ModelParams **model_params, Observation *observations)
         mu_ratio_num = 0.0;
         mu_ratio_den = 0.0;
 
+        /* first take care of transition probabilities */
+        norm = 0.0;
+        sum = 0.0;
         for (i = 0; i < (*model_params)->N; i++) {
-            /* first take care of transition probabilities */
-            norm = 0.0;
-            for (t = 0; t < (*model_params)->T - 1; t++) {
-                norm += gamma[t][i] + gamma[t][i + (*model_params)->N];
-            }
-            total_trans = 0.0;
-            for (j = 0; j < (*model_params)->N; j++) {
-                sum = 0.0;
-                for (t = 0; t < (*model_params)->T - 1; t++) {
-                    sum += xi[t][i][j] + xi[t][i + (*model_params)->N][j] +
-                             xi[t][i][j + (*model_params)->N] + 
-                             xi[t][i + (*model_params)->N][j + (*model_params)->N];
+            if (parameters->fixtrans == 0) {
+                for (j = 0; j < (*model_params)->N; j++) {
+                    for (t = 0; t < (*model_params)->T - 1; t++) {
+                        addend = xi[t][i][j] + xi[t][i + (*model_params)->N][j] +
+                                 xi[t][i][j + (*model_params)->N] +
+                                 xi[t][i + (*model_params)->N][j + (*model_params)->N];
+                        if (j != i) {
+                            sum += addend;
+                        }
+                        norm += addend;
+                    }
                 }
-                (*model_params)->a[i][j] = sum/norm;
-                total_trans += (*model_params)->a[i][j];
-                /* fprintf(stderr, "Transition %d to %d: %lf\n", i, j, (*model_params)->a[i][j]); */
             }
 
             /* state info (for estimating ratio and pi_alt parameters) */
@@ -136,6 +138,28 @@ double run_baumwelch(ModelParams **model_params, Observation *observations)
 ;
     
                 total_pialt_den += gamma[t][i] + gamma[t][i + (*model_params)->N];
+            }
+        }
+        if (parameters->fixtrans == 0) {
+            (*model_params)->trans_prob = 0.5 * sum / (norm * (((*model_params)->N) - 1.0));
+            fprintf(stderr, "New trans_prob value of %lf\n", (*model_params)->trans_prob);
+            for (i = 0; i < (*model_params)->N; i++) {
+                for (j = 0; j < (*model_params)->N; j++) {
+                    if (i != j) {
+                        ((*model_params)->a)[i][j] = (*model_params)->trans_prob;
+                        ((*model_params)->a)[i+(*model_params)->N][j] = (*model_params)->trans_prob;
+                        ((*model_params)->a)[i][j+(*model_params)->N] = (*model_params)->trans_prob;
+                        ((*model_params)->a)[i+(*model_params)->N][j+(*model_params)->N] = (*model_params)->trans_prob;
+                    }
+                    else {
+                        new_diag = 0.5 - (*model_params)->trans_prob * 
+                                          ((*model_params)->N - 1.0);
+                        ((*model_params)->a)[i][j] = new_diag;
+                        ((*model_params)->a)[i+(*model_params)->N][j] = new_diag;
+                        ((*model_params)->a)[i][j+(*model_params)->N] = new_diag;
+                        ((*model_params)->a)[i+(*model_params)->N][j+(*model_params)->N] = new_diag;
+                    }
+                }
             }
         }
         (*model_params)->mu_ratio = mu_ratio_num/mu_ratio_den;
@@ -177,26 +201,36 @@ double run_baumwelch(ModelParams **model_params, Observation *observations)
             }
         }
 
+        /* fprintf(stderr, "Muratio num %lf + %lf, den %lf + %lf\n", sig_ratio_num, small_sig_ratio_num, sig_ratio_den, small_sig_ratio_den); */
         (*model_params)->sigma_ratio = sqrt((sig_ratio_num + small_sig_ratio_num) /
                                         (sig_ratio_den + small_sig_ratio_den));
         fprintf(stderr, "New sigma_ratio value of %lf\n", (*model_params)->sigma_ratio);
 
         /* This section is an optional derivative check to assure precision is still good */
-        /* dbaum_dmuratio(*model_params, observations, gamma, &derivative);
+        dbaum_dmuratio(*model_params, observations, gamma, &derivative);
         fprintf(stderr, "Muratio derivative is %lf\n", derivative);
         dbaum_dsigratio(*model_params, observations, gamma, &derivative);
         fprintf(stderr, "Sigratio derivative is %lf\n", derivative);
         dbaum_dsigpi(*model_params, observations, gamma, &derivative);
-        fprintf(stderr, "Sigpi derivative is %lf\n", derivative); */
+        fprintf(stderr, "Sigpi derivative is %lf\n", derivative);
+        if (parameters->fixtrans == 0) {
+            dbaum_dtransprob(*model_params, observations, xi, &derivative);
+            fprintf(stderr, "Transprob derivative is %lf\n", derivative);
+        }
 
         exp_log_prob(*model_params, observations, gamma, &elogpnew);
+        if (elogpnew < elogp) {
+            fprintf(stderr, "LOWER EXPECTED PROB!!!!\n");
+        }
         fprintf(stderr, "New/Old expected logp values with old states: %lf, %lf\n", elogp, elogpnew);
 
         calc_eprobs(*model_params, observations, eprob);
         calc_alphas(*model_params, observations, alpha, eprob, &final_mll);
         calc_betas(*model_params, observations, beta, eprob);
         calc_gammas(*model_params, alpha, beta, gamma, eprob);
-        calc_xis(*model_params, alpha, beta, xi, eprob);
+        if (parameters->fixtrans == 0) {
+            calc_xis(*model_params, alpha, beta, xi, eprob);
+        }
 
         mll_diff = final_mll - initial_mll;
         if (mll_diff >= 0) {
@@ -215,7 +249,9 @@ double run_baumwelch(ModelParams **model_params, Observation *observations)
                 calc_alphas(*model_params, observations, alpha, eprob, &final_mll);
                 calc_betas(*model_params, observations, beta, eprob);
                 calc_gammas(*model_params, alpha, beta, gamma, eprob);
-                calc_xis(*model_params, alpha, beta, xi, eprob);
+                if (parameters->fixtrans == 0) {
+                    calc_xis(*model_params, alpha, beta, xi, eprob);
+                }
                 mll_diff = final_mll * TOL + 1;
                 bt_iterations++;
                 if (bt_iterations > 3) {
@@ -233,14 +269,9 @@ double run_baumwelch(ModelParams **model_params, Observation *observations)
     free_double_matrix(alpha, (*model_params)->T);
     free_double_matrix(beta, (*model_params)->T);
     free_double_matrix(gamma, (*model_params)->T);
-    for (i = 0; i < (*model_params)->T; i++) {
-        /* for (j = 0; j < 2*(*model_params)->N; j++) {
-            xiptr = *(xi + i);
-            free(xiptr + j);
-        } */
-        /* free(*(xi + i)); */
+    if (parameters->fixtrans == 0) {
+        free_double_tensor(xi, (*model_params)->T, 2*(*model_params)->N);
     }
-    free_double_tensor(xi, (*model_params)->T, 2*(*model_params)->N);
 
     return final_mll;
 }
@@ -269,7 +300,7 @@ void calc_eprobs(ModelParams *model_params, Observation *observations, double **
         exp_pi = (total == 0) ? 0.5 : 1.0*minor/total;
         exp_picontam = rho_contam * (0.5 - exp_pi) + exp_pi;
         statenorm[i] = gaussnorm/sqrt(exp_picontam * (1.0 - exp_picontam));
-        statenorm[i] /= sqrt(2.0*rho_contam + (1.0 - rho_contam)*total);
+        statenorm[i] /= sqrt(rho_contam + 0.5*(1.0 - rho_contam)*total);
         /* fprintf(stderr, "State norm for state %d is %lf\n", i, statenorm[i]); */
     }
 
@@ -321,7 +352,7 @@ void calc_gammas(ModelParams *model_params, double **alpha, double **beta, doubl
 }
 
 void calc_xis(ModelParams *model_params, double **alpha, double **beta, double ***xi, double **eprob) {
-    int i, j, istate, jstate;
+    int i, j;
     int t;
     double norm;
 
@@ -329,9 +360,7 @@ void calc_xis(ModelParams *model_params, double **alpha, double **beta, double *
         norm = 0.0;
         for (i = 0; i < 2*model_params->N; i++) {
             for (j = 0; j < 2*model_params->N; j++) {
-                istate = (i >= model_params->N) ? i - model_params->N : i;
-                jstate = (j >= model_params->N) ? j - model_params->N : j;
-                xi[t][i][j] = alpha[t][i] * beta[t+1][j] * model_params->a[istate][jstate] * eprob[t+1][j]; /* trans parameter is off by a constant but will be normalized */
+                xi[t][i][j] = alpha[t][i] * beta[t+1][j] * model_params->a[i][j] * eprob[t+1][j];
                 norm += xi[t][i][j];
             }
         }
@@ -367,3 +396,4 @@ void run_baumwelch_contam_optimization(ModelParams **model_params, Observation *
     copy_params(bestmodel, model_params);
     fprintf(stderr, "Optimal MLL at contam %lf is %lf.  Outputting model\n", (*model_params)->rho_contam, best_mll);
 }
+
