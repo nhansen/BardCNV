@@ -30,6 +30,18 @@
 
 extern Params *parameters;
 
+void show_usage()
+{
+    fprintf(stderr, "Usage: bardcnv COMMAND [parameters]\n"
+        "       where COMMAND is one of:\n"
+        "    baumwelch - train model using observations\n"
+        "    bwcontam  - train model, allowing for contamination\n"
+        "    viterbi   - report most likely state at each observation\n"
+        "    plotmu    - plot the probability for various values of mu (depth-ratio)\n"
+        "For specific parameters for each command, run 'bardcnv COMMAND'\n");
+    exit(1);
+}
+
 main(int argc, char **argv)
 {
     Observation *observations;
@@ -41,6 +53,9 @@ main(int argc, char **argv)
     get_params(argc, argv);
     small_double_check(&(parameters->minexparg));
 
+    if (parameters->program == NULL) {
+        show_usage();
+    }
     if (strcmp(parameters->program, "viterbi") == 0) {
         if (!parameters->modelfile || !parameters->obsfile) {
             fprintf(stderr, "Usage: bardcnv viterbi -modelfile <file of HMM params> -obsfile <file of observation values>\n");
@@ -93,6 +108,6 @@ main(int argc, char **argv)
     }
     else {
         fprintf(stderr, "Invalid program name %s.\n", parameters->program);
-        exit(1);
+        show_usage();
     }
 }

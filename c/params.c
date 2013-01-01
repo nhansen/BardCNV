@@ -33,7 +33,6 @@ void get_params(argc, argv)
 {
     int i;
 
-    char empty[10] = "";
     parameters = (Params *) malloc(sizeof(Params));
 
     /* defaults */
@@ -42,12 +41,12 @@ void get_params(argc, argv)
     parameters->nobins = 100; /* for plotting log likelihoods */
     parameters->fixtrans = 0; /* option to skip optimization of transition probs */
 
-    if (argc >= 1) {
+    if (argc > 1 && argv[1][0] != '-') {
         parameters->program = (char *) malloc((strlen(argv[1]) + 1) * sizeof(char));
         strcpy(parameters->program, argv[1]);
     }
     else {
-        parameters->program = empty;
+        parameters->program = NULL;
     }
 
     for (i = 2; i < argc; i++) {
