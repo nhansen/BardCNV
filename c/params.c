@@ -36,10 +36,12 @@ void get_params(argc, argv)
     parameters = (Params *) malloc(sizeof(Params));
 
     /* defaults */
-    parameters->min = 0.0; /* for plotting log likelihoods */
-    parameters->max = 0.0; /* for plotting log likelihoods */
+    parameters->min = 0.01; /* for plotting log likelihoods */
+    parameters->max = 0.5; /* for plotting log likelihoods */
     parameters->nobins = 100; /* for plotting log likelihoods */
     parameters->fixtrans = 0; /* option to skip optimization of transition probs */
+    parameters->derivatives = 0; /* option to calculate derivatives with respect to parameters */
+    parameters->maxratio = 0; /* option to limit observations to those having a given maximum ratio */
 
     if (argc > 1 && argv[1][0] != '-') {
         parameters->program = (char *) malloc((strlen(argv[1]) + 1) * sizeof(char));
@@ -61,16 +63,26 @@ void get_params(argc, argv)
         if (!strcmp(argv[i], "-min")) {
             parameters->min = atof(argv[++i]);
             fprintf(stderr, "Parsed Min value %lf\n", parameters->min);
+            if (parameters->min < 0.01) {
+                parameters->min = 0;
+            }
         }
         if (!strcmp(argv[i], "-max")) {
             parameters->max = atof(argv[++i]);
             fprintf(stderr, "Parsed Max value %lf\n", parameters->max);
+        }
+        if (!strcmp(argv[i], "-maxratio")) {
+            parameters->maxratio = atof(argv[++i]);
+            fprintf(stderr, "Parsed maxratio value %lf\n", parameters->maxratio);
         }
         if (!strcmp(argv[i], "-nobins")) {
             parameters->nobins = atoi(argv[++i]);
         }
         if (!strcmp(argv[i], "-fixtrans")) {
             parameters->fixtrans = 1;
+        }
+        if (!strcmp(argv[i], "-derivatives")) {
+            parameters->derivatives = 1;
         }
     }
 }

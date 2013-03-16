@@ -64,12 +64,14 @@ main(int argc, char **argv)
         fprintf(stderr, "Model file: %s, Observation file: %s\n", parameters->modelfile, parameters->obsfile);
         read_model(parameters->modelfile, &model_params);
         read_observations(parameters->obsfile, &model_params, &observations);
+        filter_highcopy_observations(&model_params, &observations);
         states = alloc_int_vector(model_params->T);
         probs = alloc_double_vector(model_params->T);
         run_viterbi(model_params, observations, states, probs, &log_prob);
         write_states(states, probs, log_prob, model_params, observations);
         free_int_vector(states);
         free_double_vector(probs);
+        fprintf(stderr, "Finished writing states.\n");
     }
     else if (strcmp(parameters->program, "baumwelch") == 0 ) {
         if (!parameters->modelfile || !parameters->obsfile) {
@@ -79,8 +81,10 @@ main(int argc, char **argv)
         fprintf(stderr, "Model file: %s, Observation file: %s\n", parameters->modelfile, parameters->obsfile);
         read_model(parameters->modelfile, &model_params);
         read_observations(parameters->obsfile, &model_params, &observations);
+        filter_highcopy_observations(&model_params, &observations);
         run_baumwelch(&model_params, observations); 
         write_model(model_params);
+        fprintf(stderr, "Finished writing model.\n");
     }
     else if (strcmp(parameters->program, "plotmu") == 0 ) {
         if (!parameters->modelfile || !parameters->obsfile) {
@@ -100,6 +104,7 @@ main(int argc, char **argv)
         fprintf(stderr, "Model file: %s, Observation file: %s\n", parameters->modelfile, parameters->obsfile);
         read_model(parameters->modelfile, &model_params);
         read_observations(parameters->obsfile, &model_params, &observations);
+        filter_highcopy_observations(&model_params, &observations);
         run_baumwelch_contam_optimization(&model_params, observations);
         write_model(model_params);
     }

@@ -80,6 +80,7 @@ double run_baumwelch(ModelParams **model_params, Observation *observations)
         last_sig_ratio = (*model_params)->sigma_ratio; 
         last_sig_pi = (*model_params)->sigma_pi; 
         /* expected value of log(P) */
+       
         exp_log_prob(*model_params, observations, gamma, &elogp);
 
         /* re-estimate */
@@ -119,10 +120,8 @@ double run_baumwelch(ModelParams **model_params, Observation *observations)
             thisstate = &(((*model_params)->states)[i]);
             total = thisstate->total;
             minor = thisstate->minor;
-            explow = (total == 0) ? 0.5 :
-                      1.0*minor/total + rho_contam * (0.5 - 1.0*minor/total);
-            exphigh = (total == 0) ? 0.5 :
-                      1.0 - 1.0*minor/total + rho_contam * (1.0*minor/total - 0.5);
+            explow = (rho_contam * 1.0 + (1.0 - rho_contam)*minor)/(rho_contam * 2.0 + (1.0 - rho_contam)*total);
+            exphigh = 1.0 - explow;
             
             for (t = 0; t < (*model_params)->T; t++) {
                 mu_ratio_num += (&(observations[t]))->depthratio *
@@ -206,23 +205,25 @@ double run_baumwelch(ModelParams **model_params, Observation *observations)
                                         (sig_ratio_den + small_sig_ratio_den));
         fprintf(stderr, "New sigma_ratio value of %lf\n", (*model_params)->sigma_ratio);
 
-        /* This section is an optional derivative check to assure precision is still good */
-        dbaum_dmuratio(*model_params, observations, gamma, &derivative);
-        fprintf(stderr, "Muratio derivative is %lf\n", derivative);
-        dbaum_dsigratio(*model_params, observations, gamma, &derivative);
-        fprintf(stderr, "Sigratio derivative is %lf\n", derivative);
-        dbaum_dsigpi(*model_params, observations, gamma, &derivative);
-        fprintf(stderr, "Sigpi derivative is %lf\n", derivative);
-        if (parameters->fixtrans == 0) {
-            dbaum_dtransprob(*model_params, observations, xi, &derivative);
-            fprintf(stderr, "Transprob derivative is %lf\n", derivative);
+        if (parameters->derivatives != 0) {
+            /* This section is an optional derivative check to assure precision is still good */
+            dbaum_dmuratio(*model_params, observations, gamma, &derivative);
+            fprintf(stderr, "Muratio derivative is %lf\n", derivative);
+            dbaum_dsigratio(*model_params, observations, gamma, &derivative);
+            fprintf(stderr, "Sigratio derivative is %lf\n", derivative);
+            dbaum_dsigpi(*model_params, observations, gamma, &derivative);
+            fprintf(stderr, "Sigpi derivative is %lf\n", derivative);
+            if (parameters->fixtrans == 0) {
+                dbaum_dtransprob(*model_params, observations, xi, &derivative);
+                fprintf(stderr, "Transprob derivative is %lf\n", derivative);
+            }
+    
+            exp_log_prob(*model_params, observations, gamma, &elogpnew);
+            if (elogpnew < elogp) {
+                fprintf(stderr, "LOWER EXPECTED PROB!!!!\n");
+            }
+            fprintf(stderr, "New/Old expected logp values with old states: %lf, %lf\n", elogp, elogpnew);
         }
-
-        exp_log_prob(*model_params, observations, gamma, &elogpnew);
-        if (elogpnew < elogp) {
-            fprintf(stderr, "LOWER EXPECTED PROB!!!!\n");
-        }
-        fprintf(stderr, "New/Old expected logp values with old states: %lf, %lf\n", elogp, elogpnew);
 
         calc_eprobs(*model_params, observations, eprob);
         calc_alphas(*model_params, observations, alpha, eprob, &final_mll);
@@ -297,8 +298,7 @@ void calc_eprobs(ModelParams *model_params, Observation *observations, double **
         minor = state->minor;
         total = state->total;
 
-        exp_pi = (total == 0) ? 0.5 : 1.0*minor/total;
-        exp_picontam = rho_contam * (0.5 - exp_pi) + exp_pi;
+        exp_picontam = (rho_contam * 1.0 + (1.0 - rho_contam)*minor)/(rho_contam * 2.0 + (1.0 - rho_contam)*total);
         statenorm[i] = gaussnorm/sqrt(exp_picontam * (1.0 - exp_picontam));
         statenorm[i] /= sqrt(rho_contam + 0.5*(1.0 - rho_contam)*total);
         /* fprintf(stderr, "State norm for state %d is %lf\n", i, statenorm[i]); */
@@ -379,8 +379,8 @@ void run_baumwelch_contam_optimization(ModelParams **model_params, Observation *
     ModelParams *bestmodel;
     double min_contam, max_contam, contam, mll, best_mll;
 
-    min_contam = 0.01;
-    max_contam = 0.50;
+    min_contam = parameters->min;
+    max_contam = parameters->max;
     best_mll = -9999999999;
     for (contam = min_contam; contam <= max_contam; contam += 0.01) {
         (*model_params)->rho_contam = contam;

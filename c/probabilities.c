@@ -72,13 +72,7 @@ void altfreq_log_prob(ModelParams *model_params, Observation obs, int i, int sig
 
     pi = (&obs)->pi;
 
-    if (total > 0) {
-        exp_pi = (sig_pm == -1) ? 1.0*minor/total : 1.0 - 1.0*minor/total;
-        exp_picontam = rho_contam * (0.5 - exp_pi) + exp_pi;
-    }
-    else {
-        exp_picontam = 0.5;
-    }
+    exp_picontam = (sig_pm == -1) ? (rho_contam * 1.0 + (1.0 - rho_contam)*minor)/(rho_contam * 2.0 + (1.0 - rho_contam)*total) : (rho_contam * 1.0 + (1.0 - rho_contam)*(total-minor))/(rho_contam * 2.0 + (1.0 - rho_contam)*total);
 
     diff = pi - exp_picontam;
     log_prob = -1.0*(diff*diff)/(8.0*exp_picontam*(1.0-exp_picontam)*sigma_pi*sigma_pi);
@@ -163,8 +157,9 @@ void dbaum_dsigpi(ModelParams *model_params, Observation *observations, double *
         minor = state->minor;
         total = state->total;
 
-        exp_pi = (total == 0) ? 0.5 : 1.0*minor/total;
-        exp_picontam = rho_contam * (0.5 - exp_pi) + exp_pi;
+        /* exp_pi = (total == 0) ? 0.5 : 1.0*minor/total;
+        exp_picontam = rho_contam * (0.5 - exp_pi) + exp_pi; */
+        exp_picontam = (rho_contam * 1.0 + (1.0 - rho_contam)*minor)/(rho_contam * 2.0 + (1.0 - rho_contam)*total);
 
         for (t = 0; t < model_params->T; t++) {
             addend = (gamma[t][i] + gamma[t][i + model_params->N]) * (-1.0/sig);
@@ -218,8 +213,9 @@ void exp_log_prob(ModelParams *model_params, Observation *observations, double *
         state = model_params->states + i;
         minor = state->minor;
         total = state->total;
-        exp_pi = (total == 0) ? 0.5 : 1.0*minor/total;
-        exp_picontam = rho_contam * (0.5 - exp_pi) + exp_pi;
+        /* exp_pi = (total == 0) ? 0.5 : 1.0*minor/total;
+        exp_picontam = rho_contam * (0.5 - exp_pi) + exp_pi; */
+        exp_picontam = (rho_contam * 1.0 + (1.0 - rho_contam)*minor)/(rho_contam * 2.0 + (1.0 - rho_contam)*total);
 
         loggauss = log(4.0*3.14159*model_params->sigma_pi *
                                       model_params->sigma_ratio);

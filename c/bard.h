@@ -27,10 +27,11 @@ typedef struct params {
     char *program;
     char *modelfile;
     char *obsfile;
-    double min, max;
+    double min, max, maxratio;
     double minexparg;
     long nobins;
     int fixtrans;
+    int derivatives;
 
 } Params;
 
@@ -64,6 +65,7 @@ typedef struct observation {
 
 void read_model(char *filename, ModelParams **model_params);
 void read_observations(char *filename, ModelParams **model_params, Observation **observations);
+void filter_highcopy_observations(ModelParams **model_params, Observation **observations);
 void run_viterbi(ModelParams *model_params, Observation *observations, int *state_indices, double *probs, double *log_prob);
 void ratio_log_prob(ModelParams *model_params, Observation obs, int i, double *ans);
 void altfreq_log_prob(ModelParams *model_params, Observation obs, int i, int sig_pm, double *ans);

@@ -45,8 +45,9 @@ void calc_alphas(ModelParams *model_params, Observation *observations, double **
     }
 
     if (norm <= 0.0) {
-        fprintf(stderr, "Underflow in alphas at t=0\n");
-        exit(1);
+        fprintf(stderr, "Underflow in alphas at t=0--assigning all probability to 0 state.\n");
+        norm = 1.0;
+        alpha[0][0] = 1.0;
     }
 
     for (i = 0; i < 2*model_params->N; i++) {
@@ -68,8 +69,9 @@ void calc_alphas(ModelParams *model_params, Observation *observations, double **
             norm += alpha[t + 1][j];
         }
         if (norm <= 0.0) {
-            fprintf(stderr, "Underflow in alphas at t=%d\n", t);
-            exit(1);
+            fprintf(stderr, "Underflow in alphas at t=%d--assigning all probability to 0 state.\n", t);
+            norm = 1.0;
+            alpha[t+1][0] = 1.0;
         }
         sum = 0.0;
         for (j = 0; j < 2*model_params->N; j++) {

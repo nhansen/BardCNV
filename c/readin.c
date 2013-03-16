@@ -34,6 +34,7 @@ void read_observations(char *filename, ModelParams **model_params, Observation *
     FILE *fc, *fp;
     char wcstring[100000];
     long noLines, obsNo;
+    size_t obsmem;
     char chr[1000];
     char *chrptr;
     long pos;
@@ -49,10 +50,14 @@ void read_observations(char *filename, ModelParams **model_params, Observation *
     else { /* read number of lines and allocate memory */
         if (fscanf(fc, "%s", wcstring) == 1) {
             noLines = atoi(wcstring);
-            *observations = (Observation *)malloc(sizeof(Observation)*noLines);
+            obsmem = sizeof(Observation)*noLines;
+            *observations = (Observation *)malloc(obsmem);
             if (!*observations) {
                 fprintf(stderr, "Couldn't allocate memory!\n");
                 exit(1);
+            }
+            else {
+                fprintf(stderr, "Allocated memory for observations: %lu\n", (unsigned long)obsmem);
             } 
         }
         else {
@@ -206,3 +211,43 @@ void read_model(char *filename, ModelParams **model_params)
     fclose(fp);
 }
 
+void filter_highcopy_observations(ModelParams **model_params, Observation **observations)
+{
+    int i, j, maxcopies, totalcopies, noStates, noskipped;
+    double maxdepth, thisdepth;
+
+    if (parameters->maxratio == 0) {
+        noStates = (*model_params)->N;
+        maxcopies = 0;
+        for (i=0; i < 2*noStates; i++) {
+            totalcopies = (&(((*model_params)->states)[i]))->total;
+            if (totalcopies > maxcopies) {
+                maxcopies = totalcopies;
+            }
+        }
+        maxdepth = maxcopies*(*model_params)->mu_ratio*0.5 + 3.0*(*model_params)->sigma_ratio;
+    }
+    else {
+        maxdepth = parameters->maxratio;
+    }
+
+    fprintf(stderr, "Max depth is %lf\n", maxdepth);
+    noskipped = 0;
+    j = 0; /* index of observations slot to be filled */
+    for (i=0; i < (*model_params)->T; i++) {
+        thisdepth = (&(*observations)[i])->depthratio;
+        if (thisdepth > maxdepth) {
+            /* fprintf(stderr, "Skipping observation with depth %lf\n", thisdepth); */
+            noskipped++;
+            continue;
+        }
+        else {
+            (*observations)[j] = (*observations)[i]; 
+            j++;
+        }
+    }
+    (*model_params)->T -= noskipped;
+    if (noskipped > 0) {
+        fprintf(stderr, "Skipped %i observations with coverage ratios higher than %lf.\n", noskipped, maxdepth);
+    }
+}
