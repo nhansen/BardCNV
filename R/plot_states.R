@@ -38,6 +38,8 @@ plot_states <- function(df, plotchr, xlow=0, xhigh=0, muratio=0.0, sample=c(""),
     plot(pos, total, ylim=c(0,ymax), type="s", col=c("darkblue"), xlim=c(xlow, xhigh), main="Predicted States");
     points(pos, minor, type="s", col=c("orange"));
     legend(xlow+(xhigh-xlow)*6.5/10, 0.53*ymax, c("total copies", "minor allele copies"), col=c("darkblue", "orange"), lwd=c(1,1), bty="n")
+    detach(df);
+    detach(newdf);
 }
 
 read_states <- function(filename) {
@@ -50,8 +52,8 @@ read_segs <- function(filename) {
     return(segs);
 }
 
-plot_segs <- function(segs, segcol=c("black"), chr=c("1")) {
-    chrsegs <- segs[segs[[1]]==chr, ];
+plot_segs <- function(segs, segcol=c("black"), segchr=c("1")) {
+    chrsegs <- segs[segs[[1]]==segchr, ];
     x0 <- chrsegs[[2]];
     y0 <- chrsegs[[4]];
     x1 <- chrsegs[[3]];
@@ -60,8 +62,8 @@ plot_segs <- function(segs, segcol=c("black"), chr=c("1")) {
     segments(x0, y0, x1, y1, col=segcol);
 }
 
-add_segs <- function(segs, segcol=c("black"), chr=c("1"), muratio=1.0, contam=0.01, pi=0) {
-    chrsegs <- segs[segs[[1]]==chr, ];
+add_segs <- function(segs, segcol=c("black"), addchr=c("1"), muratio=1.0, contam=0.01, pi=0) {
+    chrsegs <- segs[segs[[1]]==addchr, ];
     minorcount <- chrsegs[[4]];
     minorcount[minorcount=="."] <- 1;
     minorcount <- as.numeric(as.character(minorcount));

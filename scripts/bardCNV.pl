@@ -20,6 +20,7 @@ bardCNV.pl - given a file of heterozygous positions (in the normal sample), trai
 =head1 SYNOPSIS
 
   bardCNV.pl --normalbam <bam file from normal sample> --tumorbam <bam file from tumor> --ref <reference fasta> --hetfile <BED formatted file of positions heterozygous in the normal>
+  bardCNV.pl --trio --mombam <bam file from mother's sample> --dadbam <bam file from father's sample> --childbam <bam file from child>
 
 =head1 DESCRIPTION
 
@@ -54,12 +55,17 @@ if ($Opt{'plots'}) {
 sub process_commandline {
     # Set defaults here
     %Opt = ( mindepth => 0 , maxcopies => 8, transprob => 0.0001, countopts => '',
-             sigratio => 0.30, contam => 0.01, sigpi => 0.15, maxviterbicopies => 24 );
+             sigratio => 0.30, contam => 0.01, sigpi => 0.15, maxviterbicopies => 24,
+             mincontam => 0.01, maxcontam => 0.5 );
     GetOptions(
         \%Opt, qw(
             manual help+ version normalbam=s tumorbam=s ref=s
-            outdir=s hetfile=s mindepth=i maxcopies=i transprob=f countopts=s trio
-            sigratio=f contam=f sigpi=f skipcounts skipobs skiptrain skipstates skipvcf
+            outdir=s hetfile=s mindepth=i maxcopies=i 
+            transprob=f countopts=s trio fixedtrans
+            mombam=s dadbam=s childbam=s male
+            sigratio=f contam=f optcontam mincontam=i
+            maxcontam=i sigpi=f skipcounts skipobs 
+            skiptrain skipstates skipvcf
             omittrainentries=s plots sge vcf!
 		  )
 	) || pod2usage(0);
@@ -68,8 +74,21 @@ sub process_commandline {
     if ( $Opt{version} ) {
         die "bardCNV.pl, ", q$Revision:$, "\n";
     }
-    if (!$Opt{'normalbam'} || !$Opt{'tumorbam'} || !$Opt{'ref'} || !$Opt{'hetfile'}) {
+    if ($Opt{'trio'}) {
+        if (!$Opt{'mombam'} || !$Opt{'dadbam'} || !$Opt{'childbam'}) {
+            die "Options --mombam, --dadbam, --childbam, and --ref are required with --trio option!\n";
+        }
+    }
+    elsif (!$Opt{'normalbam'} || !$Opt{'tumorbam'} || !$Opt{'ref'} || !$Opt{'hetfile'}) {
         die "Options --normalbam, --tumorbam, --hetfile, and --ref are required!\n";
+    }
+    if ($Opt{'optcontam'}) {
+        if ($Opt{'mincontam'} < 0.01) {
+           $Opt{'mincontam'} = 0.01;
+        }
+        if ($Opt{'maxcontam'} > 0.99) {
+           $Opt{'maxcontam'} = 0.99;
+        }
     }
 }
 
@@ -115,9 +134,6 @@ sub create_observable_files {
         }
     }
     else { # generate counts files:
-        if (!(-e $Opt{'normalbam'}) || !(-e $Opt{'tumorbam'})) {
-            die "Files $Opt{'normalbam'} and $Opt{'tumorbam'} must exist!\n";
-        }
         my @count_commands = ();
         my @bam_files = ($Opt{'trio'}) ? ('mombam', 'dadbam', 'childbam') : ('normalbam', 'tumorbam');
         foreach my $fileopt (@bam_files) {
@@ -131,34 +147,52 @@ sub create_observable_files {
     my $rh_norm_count = {};
     my $rh_tumor_count = {};
     my $rh_alt_ratio = {};
-
-    open NORM, "$workdir/normalbam.counts"
-        or die "Couldn\'t open $workdir/normalbam.counts: $!\n";
-    
     my $rh_alt_allele = {};
-    while (<NORM>) {
-        if (/^(\S+)\s(\d+)\s(\S)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)$/) {
-            my ($chr, $pos, $ref, $A_count, $T_count, $G_count, $C_count, $a_count, $t_count, $g_count, $c_count) = ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
-            next if ($ref !~ /[ATGC]/);
-            my %base_counts = ();
-            $base_counts{'A'} = $A_count + $a_count;
-            $base_counts{'T'} = $T_count + $t_count;
-            $base_counts{'C'} = $C_count + $c_count;
-            $base_counts{'G'} = $G_count + $g_count;
-            $rh_norm_count->{$chr}->{$pos} = $base_counts{'A'} + $base_counts{'T'} + $base_counts{'G'} + $base_counts{'C'};
-    
-            my $ref_count = $base_counts{$ref};
-            delete $base_counts{$ref};
-    
-            my @sorted_bases = sort {$base_counts{$b} <=> $base_counts{$a}} keys %base_counts;
-            my $alt_count = $base_counts{$sorted_bases[0]};
-            $rh_alt_allele->{$chr}->{$pos} = $sorted_bases[0];
+
+    my @normal_count_files = ($Opt{'trio'}) ? ("$workdir/mombam.counts", "$workdir/dadbam.counts") :
+                                              ("$workdir/normalbam.counts");
+    foreach my $normal_file (@normal_count_files) {
+        open NORM, "$normal_file"
+            or die "Couldn\'t open $normal_file: $!\n";
+        
+        while (<NORM>) {
+            if (/^(\S+)\s(\d+)\s(\S)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)$/) {
+                my ($chr, $pos, $ref, $A_count, $T_count, $G_count, $C_count, $a_count, $t_count, $g_count, $c_count) = ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
+                next if ($ref !~ /[ATGC]/);
+                my %base_counts = ();
+                $base_counts{'A'} = $A_count + $a_count;
+                $base_counts{'T'} = $T_count + $t_count;
+                $base_counts{'C'} = $C_count + $c_count;
+                $base_counts{'G'} = $G_count + $g_count;
+
+                # add in coverage, multiplying by two if this is a dad in a trio:
+                my $multiplier = 1;
+                if (($Opt{'trio'}) && ($normal_file eq "$workdir/dadbam.counts") && 
+                                 ($chr =~ /x/i) && (nonpar_xpos($pos))) {
+                    $multiplier = 2;
+                }
+
+                $rh_norm_count->{$chr}->{$pos} += $multiplier * ($base_counts{'A'} + $base_counts{'T'} + 
+                                                        $base_counts{'G'} + $base_counts{'C'});
+        
+                my $ref_count = $base_counts{$ref};
+                if (!$Opt{'trio'}) {
+                    delete $base_counts{$ref}; # for trios, only one sample will display alternate allele
+                }
+        
+                my @sorted_bases = sort {$base_counts{$b} <=> $base_counts{$a}} keys %base_counts;
+                my $alt_count = $base_counts{$sorted_bases[0]};
+                if ($sorted_bases[0] ne $ref) {
+                    $rh_alt_allele->{$chr}->{$pos} = $sorted_bases[0];
+                }
+            }
         }
+        close NORM;
     }
-    close NORM;
-    
-    open TUMOR, "$workdir/tumorbam.counts"
-        or die "Couldn\'t open $workdir/tumorbam.counts: $!\n";
+   
+    my $tumorfile = ($Opt{'trio'}) ? "$workdir/childbam.counts" : "$workdir/tumorbam.counts"; 
+    open TUMOR, $tumorfile
+        or die "Couldn\'t open $tumorfile: $!\n";
     
     while (<TUMOR>) {
         if (/^(\S+)\s(\d+)\s(\S)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)$/) {
@@ -202,7 +236,7 @@ sub create_observable_files {
             next if (!$normal_reads);
             my $rdr = $tumor_reads/$normal_reads;
             my $alt_freq = ($rh_alt_ratio->{$chr} && defined($rh_alt_ratio->{$chr}->{$pos})) ? $rh_alt_ratio->{$chr}->{$pos} : 0.5;
-            if (!@omit_entries || !grep {$_ eq $chr} @omit_entries) {
+            if ((!@omit_entries || !grep {$_ eq $chr} @omit_entries) && ($chr !~ /X/ || !$Opt{'male'} )) {
                 print TRAINOBS "$chr\t$pos\t$rdr\t$alt_freq\n";
             }
             print STATEOBS "$chr\t$pos\t$rdr\t$alt_freq\n";
@@ -234,21 +268,34 @@ sub train_model {
     my $max_bin = $sorted_bins[0];
     print STDERR "Most common read depth ratio: $max_bin\n";
     my @muratio_vals = ($max_bin/4.0, $max_bin/3.0, $max_bin/2.0, 2.0*$max_bin/3.0, $max_bin, 2.0*$max_bin);
+    my @contam_vals = ();
+    if ($Opt{'optcontam'}) {
+        for (my $thiscontam = $Opt{'mincontam'}; $thiscontam <= $Opt{'maxcontam'}; $thiscontam+= 0.01) {
+            push @contam_vals, $thiscontam;
+        }
+    }
+    else {
+        push @contam_vals, $Opt{'contam'};
+    }
+
     my @train_commands = ();
     my @output_files = ();
     foreach my $muratio (@muratio_vals) {
         my $muratio_string = sprintf("%5.3f", $muratio);
-        if (!$Opt{'skiptrain'}) {
-            if (!(-e "$workdir/train_$muratio_string")) {
-                mkdir "$workdir/train_$muratio_string"
-                    or die "Couldn\'t create $workdir/train_$muratio_string: $!\n";
+        foreach my $contamval (@contam_vals) {
+            if (!$Opt{'skiptrain'}) {
+                if (!(-e "$workdir/train_$muratio_string\_$contamval")) {
+                    mkdir "$workdir/train_$muratio_string\_$contamval"
+                        or die "Couldn\'t create $workdir/train_$muratio_string\_$contamval: $!\n";
+                }
+                write_train_start_file("$workdir/train_$muratio_string\_$contamval/train_start.txt", $muratio, $contamval); 
+                my $maxratio_opt = $max_bin*6.0;
+                my $fix_opt = ($Opt{'fixedtrans'}) ? '-fixtrans' : '';
+                my $train_cmd = "bardcnv baumwelch -obsfile $obs_file -modelfile $workdir/train_$muratio_string\_$contamval/train_start.txt $fix_opt -maxratio $maxratio_opt > $workdir/train_$muratio_string\_$contamval/train.out 2>$workdir/train_$muratio_string\_$contamval/train.err";
+                push @train_commands, $train_cmd;
             }
-            write_train_start_file("$workdir/train_$muratio_string/train_start.txt", $muratio); 
-            my $maxratio_opt = $max_bin*6.0;
-            my $train_cmd = "bardcnv baumwelch -obsfile $obs_file -modelfile $workdir/train_$muratio_string/train_start.txt -maxratio $maxratio_opt > $workdir/train_$muratio_string/train.out 2>$workdir/train_$muratio_string/train.err";
-            push @train_commands, $train_cmd;
+            push @output_files, "$workdir/train_$muratio_string\_$contamval/train.out";
         }
-        push @output_files, "$workdir/train_$muratio_string/train.out";
     }
     if (!$Opt{'skiptrain'}) {
         run_commands(\@train_commands, -mem_free => '80G', '-o' => $workdir, '-e' => $workdir);
@@ -284,6 +331,7 @@ sub train_model {
 sub write_train_start_file {
     my $startfile = shift;
     my $muratio = shift;
+    my $contamval = shift;
 
     my $maxcopies = $Opt{'maxcopies'};
     my $total_states = 0;
@@ -313,7 +361,7 @@ sub write_train_start_file {
     print START "Transprob= $Opt{'transprob'}\n";
     print START "mu_ratio= $muratio\n";
     print START "sigma_ratio= $Opt{'sigratio'}\n";
-    print START "rho_contam= $Opt{'contam'}\n";
+    print START "rho_contam= $contamval\n";
     print START "sigma_pi= $Opt{'sigpi'}\n";
 
     close START;
@@ -418,6 +466,9 @@ sub calc_stats_file {
             my $chr = $1;
             my $score = $7;
             $all_chroms{$chr} = 1;
+            $rh_qual_stats->{$chr}->{'total'} = 0 if (! (defined ($rh_qual_stats->{$chr}->{'total'})));
+            $rh_qual_stats->{$chr}->{'60'} = 0 if (! (defined ($rh_qual_stats->{$chr}->{'60'})));
+            $rh_qual_stats->{$chr}->{'90'} = 0 if (! (defined ($rh_qual_stats->{$chr}->{'90'})));
             $rh_qual_stats->{$chr}->{'total'}++;
             $rh_qual_stats->{$chr}->{'60'}++ if ($score>=60);;
             $rh_qual_stats->{$chr}->{'90'}++ if ($score>=90);;
@@ -466,19 +517,19 @@ states <- read_states("$state_file");
 states60 <- states[states\$score >= 60, ];
 chroms <- unique(states\$chr);
 
-for (chr in chroms) {
-    file = paste("$workdir/plots/", chr, ".png", sep="");
+for (thischr in chroms) {
+    file = paste("$workdir/plots/", thischr, ".png", sep="");
     png(file);
-    plot_states(states, chr, muratio=$muratio, contam=$contam);
+    plot_states(states, thischr, muratio=$muratio, contam=$contam);
     dev.off();
 }
 
 chromshq <- unique(states60\$chr);
 
-for (chr in chromshq) {
-    file = paste("$workdir/plots/", chr, ".hq.png", sep="");
+for (thischr in chromshq) {
+    file = paste("$workdir/plots/", thischr, ".hq.png", sep="");
     png(file);
-    plot_states(states60, chr, muratio=$muratio, contam=$contam);
+    plot_states(states60, thischr, muratio=$muratio, contam=$contam);
     dev.off();
 }
 
@@ -572,6 +623,26 @@ sub sge_submit {
     return {'cmdfile' => $tempfile, 'jobid' => $job_id};
 }
 
+sub nonpar_xpos {
+    my $pos = shift;
+
+    if ($Opt{'ref'} =~ /hg18/i) {
+        if ($pos >= 2709521 && $pos <= 154584238) {
+            return 1;
+        }
+    }
+    elsif ($Opt{'ref'} =~ /hg19/i) {
+        if ($pos >= 2699521 && $pos <= 154931044) {
+            return 1;
+        }
+    }
+    else {
+        die "Unable to determine non-PAR regions of X-chromosome: Can\'t determine build from reference fasta name!\n";
+    }
+
+    return 0;
+}
+
 
 __END__
 
@@ -606,7 +677,11 @@ Specify the maximum total number of copies to use in the training step (limits m
 
 =item B<--transprob>
 
-Specify the starting value for the transition probability between different states (which is constrained to be the same for all inter-state transitions (default 0.0001).
+Specify the starting value for the transition probability between different states (which is constrained to be the same for all inter-state transitions (default 0.0001).  To fix the transition probability so that it is not optimized using Baum-Welch, use the "--fixedtrans" option.
+
+=item B<--fixedtrans>
+
+Do not optimize the state transition probabilities using Baum-Welch.  Often, allowing the transition probability to vary will result in overfitting of the model with an overly-large transition probability, allowing the introduction of small artifactual copy number changes to increase the likelihood of data that doesn't conform to the overly-simplistic Gaussian model.
 
 =item B<--sigratio>
 
@@ -619,6 +694,22 @@ Specify the starting value for the standard deviation of the (Gaussian distribut
 =item B<--contam>
 
 Specify the percentage contamination of the tumor tissue which is estimated to actually be unaffected (default 0.01).
+
+=item B<--optcontam>
+
+Train the model for a range of contamination values, then output states for the optimal model at the optimal contamination.
+
+=item B<--mincontam>
+
+If using --optcontam option, this is the minimum value of the contamination parameter to test (default 0.01).  Note: if any value less then 0.01 is specified, 0.01 will be used.
+
+=item B<--maxcontam>
+
+If using --optcontam option, this is the maximum value of the contamination parameter to test (default 0.50).  Note: if any value greater than 0.99 is specified, 0.99 will be used.
+
+=item B<--male>
+
+Omit any chromosome containing the character "X" in the training step (this is because sites, at least in the non-PAR regions of X for a male, cannot be heterozygous.
 
 =back
 
