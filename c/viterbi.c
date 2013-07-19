@@ -34,14 +34,26 @@ void run_viterbi(ModelParams *model_params, Observation *observations, int *stat
     int **psi;
     double *log_pi;
     double **log_a;
-    int i, j, istate, jstate, isig;
+    int i, j;
     long t;
     double max_logprob, this_logprob;
-    double altfreq_logprob, ratio_logprob, loggaussnorm;
-    int max_index, index1, index2;
-    double **eprob, **alpha, **beta, **gamma, mll;
+    int max_index, index;
+    double **bprob, **eprob, **alpha, **beta, **gamma, mll;
 
-    loggaussnorm = -log(2.0*3.14159*model_params->sigma_pi*model_params->sigma_ratio);
+    /* Find probabilities by solving for gammas: */
+    fprintf(stderr, "Starting viterbi\n");
+
+    bprob = alloc_double_matrix(model_params->T, model_params->N);
+    eprob = alloc_double_matrix(model_params->T, model_params->N);
+    alpha = alloc_double_matrix(model_params->T, model_params->N);
+    beta = alloc_double_matrix(model_params->T, model_params->N);
+    gamma = alloc_double_matrix(model_params->T, model_params->N);
+
+    calc_bprobs(model_params, observations, bprob);
+    calc_eprobs(model_params, observations, eprob);
+    calc_alphas(model_params, observations, alpha, bprob, eprob, &mll);
+    calc_betas(model_params, observations, beta, bprob, eprob);
+    calc_gammas(model_params, alpha, beta, gamma);
 
     /* Calculate logs of parameters for easier manipulation. */
 
@@ -51,49 +63,34 @@ void run_viterbi(ModelParams *model_params, Observation *observations, int *stat
     } 
 
     log_a = alloc_double_matrix(model_params->N, model_params->N);
-    log_delta = alloc_double_matrix(model_params->T, 2*model_params->N);
-
-    psi = alloc_int_matrix(model_params->T, 2*model_params->N);
-
     for (i = 0; i < model_params->N; i++) {
         for (j = 0; j < model_params->N; j++) {
             log_a[i][j] = log(model_params->a[i][j]);
         }
     }
 
+    log_delta = alloc_double_matrix(model_params->T, model_params->N);
+
+    psi = alloc_int_matrix(model_params->T, model_params->N);
+
     /* Initialization */
     for (i = 0; i < model_params->N; i++) {
-        ratio_log_prob(model_params, observations[0], i, &ratio_logprob);
-        log_delta[0][i] = log_pi[i] + ratio_logprob;
-        log_delta[0][i + model_params->N] = log_delta[0][i];
-        altfreq_log_prob(model_params, observations[0], i, -1, &altfreq_logprob);
-        log_delta[0][i] += altfreq_logprob;
-        altfreq_log_prob(model_params, observations[0], i, 1, &altfreq_logprob);
-        log_delta[0][i + model_params->N] += altfreq_logprob;
-
+        log_delta[0][i] = log_pi[i] + log(bprob[0][i]) + log(eprob[0][i]);
         psi[0][i] = 0;
-        psi[0][i + model_params->N] = 0;
-        /* fprintf(stderr, "State %d has logprobs %lf/%lf\n", i, ratio_logprob, altfreq_logprob); */
     }
 
     /* Recursion */
     for (t = 1; t < model_params->T; t++) {
-        for (i = 0; i < 2*model_params->N; i++) {
-            istate = (i < model_params->N) ? i : i - model_params->N;
-            isig = (i < model_params->N) ? -1 : 1;
+        for (i = 0; i < model_params->N; i++) {
             max_logprob = -99999999.0;
-            for (j = 0; j < 2*model_params->N; j++) {
-                jstate = (j < model_params->N) ? j : j - model_params->N;
-                this_logprob = log_delta[t-1][j] + log_a[jstate][istate]; 
+            for (j = 0; j < model_params->N; j++) {
+                this_logprob = log_delta[t-1][j] + log_a[j][i]; 
                 if (this_logprob > max_logprob) {
                     max_logprob = this_logprob;
                     max_index = j;
                 }
             }
-            ratio_log_prob(model_params, observations[t], istate, &ratio_logprob);
-            log_delta[t][i] = max_logprob + ratio_logprob;
-            altfreq_log_prob(model_params, observations[t], istate, isig, &altfreq_logprob);
-            log_delta[t][i] += altfreq_logprob;
+            log_delta[t][i] = max_logprob + log(bprob[t][i]) + log(eprob[t][i]);
             psi[t][i] = max_index;
         }
     }
@@ -101,7 +98,7 @@ void run_viterbi(ModelParams *model_params, Observation *observations, int *stat
     /* Termination */
     *log_prob = -99999999.0;
     state_indices[model_params->T - 1] = 1;
-    for (i = 0; i < 2*model_params->N; i++) {
+    for (i = 0; i < model_params->N; i++) {
         if (log_delta[model_params->T - 1][i] > *log_prob) {
             *log_prob = log_delta[model_params->T - 1][i];
             state_indices[model_params->T - 1] = i;
@@ -117,26 +114,15 @@ void run_viterbi(ModelParams *model_params, Observation *observations, int *stat
     free_double_vector(log_pi);
     free_double_matrix(log_a, model_params->N);
     free_double_matrix(log_delta, model_params->T);
-    free_int_matrix(psi, 2*model_params->N);
+    free_int_matrix(psi, model_params->N);
 
     fprintf(stderr, "Done with viterbi\n");
 
-    /* Find probabilities by solving for gammas: */
-
-    eprob = alloc_double_matrix(model_params->T, 2*model_params->N);
-    alpha = alloc_double_matrix(model_params->T, 2*model_params->N);
-    beta = alloc_double_matrix(model_params->T, 2*model_params->N);
-    gamma = alloc_double_matrix(model_params->T, 2*model_params->N);
-
-    calc_eprobs(model_params, observations, eprob);
-    calc_alphas(model_params, observations, alpha, eprob, &mll);
-    calc_betas(model_params, observations, beta, eprob);
-    calc_gammas(model_params, alpha, beta, gamma, eprob);
 
     for (t = 0; t < model_params->T; t++) {
-        index1 = state_indices[t];
-        index2 = (index1 >= model_params->N) ? index1 - model_params->N : index1 + model_params->N;
-        state_probabilities[t] = gamma[t][index1] + gamma[t][index2];
+        index = state_indices[t];
+        state_probabilities[t] = gamma[t][index];
+        fprintf(stderr, "time %ld probability %lf for state %d\n", t, state_probabilities[t], index);
     }
 
     free_double_matrix(eprob, model_params->T);

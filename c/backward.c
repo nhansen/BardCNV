@@ -30,27 +30,28 @@ extern Params *parameters;
 
 /* "backward" procedure */
 
-void calc_betas(ModelParams *model_params, Observation *observations, double **beta, double **eprob) {
-    int i, j, t;
+void calc_betas(ModelParams *model_params, Observation *observations, double **beta, double **bprob, double **eprob) {
+    int i, j;
+    long t;
     double norm, sum;
 
     /* Initialization */
-    for (i = 0; i < 2*model_params->N; i++) {
-        beta[model_params->T - 1][i] = 0.5/model_params->N;
+    for (i = 0; i < model_params->N; i++) {
+        beta[model_params->T - 1][i] = 1.0/model_params->N;
     }
 
     /* Induction */
     for (t = model_params->T - 2; t >= 0; t--) {
         norm = 0.0;
-        for (i = 0; i < 2*model_params->N; i++) {
+        for (i = 0; i < model_params->N; i++) {
             sum = 0.0;
-            for (j = 0; j < 2*model_params->N; j++) {
-                sum += model_params->a[i][j] * beta[t+1][j] * eprob[t+1][j];
+            for (j = 0; j < model_params->N; j++) {
+                sum += model_params->a[i][j] * beta[t+1][j] * bprob[t+1][j] * eprob[t+1][j];
             } 
             beta[t][i] = sum;
             norm += sum;
         }
-        for (i = 0; i < 2*model_params->N; i++) {
+        for (i = 0; i < model_params->N; i++) {
             beta[t][i] /= norm;
         }
     }

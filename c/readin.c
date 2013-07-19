@@ -38,7 +38,7 @@ void read_observations(char *filename, ModelParams **model_params, Observation *
     char chr[1000];
     char *chrptr;
     long pos;
-    double ratio, pi;
+    long normaldepth, tumordepth, tumoralt;
     Observation *thisObs;
 
     /* Number of lines in observation file is upper limit on number of observations */
@@ -75,7 +75,7 @@ void read_observations(char *filename, ModelParams **model_params, Observation *
     }
 
     obsNo = 0;
-    while (fscanf(fp, "%s\t%d\t%lf\t%lf", chr, &pos, &ratio, &pi) == 4) {
+    while (fscanf(fp, "%s\t%ld\t%ld\t%ld\t%ld", chr, &pos, &normaldepth, &tumordepth, &tumoralt) == 5) {
         chrptr = (char *)malloc(sizeof(char)*(strlen(chr) + 1));
         if (!chrptr) {
             fprintf(stderr, "Couldn't allocate memory!\n");
@@ -83,14 +83,12 @@ void read_observations(char *filename, ModelParams **model_params, Observation *
         }
         strcpy(chrptr, chr);
         thisObs = *observations + obsNo;
-        if (ratio == 0.00) {
-            pi = 0.5;
-        }
         obsNo++;
         thisObs->chr = chrptr;
         thisObs->pos = pos;
-        thisObs->depthratio = ratio;
-        thisObs->pi = pi;
+        thisObs->normaltotaldepth = normaldepth;
+        thisObs->tumortotaldepth = tumordepth;
+        thisObs->tumoraltdepth = tumoralt;
     }
     (*model_params)->T = obsNo;
     fclose(fp);
@@ -114,8 +112,6 @@ void read_model(char *filename, ModelParams **model_params)
         exit(1);
     }
     (*model_params)->T = 0;
-
-    /* Open observation file and read observations into Observation array */
 
     if ((fp = fopen(filename, "r")) == NULL) {
         fprintf(stderr, "Unable to read file %s\n", filename);
@@ -143,12 +139,12 @@ void read_model(char *filename, ModelParams **model_params)
             }
         }
         /* allocate space for state transitions */
-        (*model_params)->a = alloc_double_matrix(2*noStates, 2*noStates);
+        (*model_params)->a = alloc_double_matrix(noStates, noStates);
         fscanf(fp, " %s ", keyword);
         /* if (strcmp(keyword, "Transitions") == 0) {
-            for (i=0; i < 2*noStates; i++) {
+            for (i=0; i < noStates; i++) {
                 transProb = (*model_params)->a[i];
-                for (j=0; j < 2*noStates; j++) {
+                for (j=0; j < noStates; j++) {
                     if (fscanf(fp, "%lf ", transProb) == 1) {
                         transProb++;
                     }
@@ -163,16 +159,16 @@ void read_model(char *filename, ModelParams **model_params)
         if (strcmp(keyword, "Transprob=") == 0) {
             if (fscanf(fp, " %lf ", &((*model_params)->trans_prob))==1) {
                 fprintf(stderr, "Transprob is %g\n", (*model_params)->trans_prob);
-                for (i=0; i < 2*noStates; i++) {
+                for (i=0; i < noStates; i++) {
                     transProb = (*model_params)->a[i];
-                    for (j=0; j < 2*noStates; j++) {
+                    for (j=0; j < noStates; j++) {
                         istate = (i >= noStates) ? i - noStates : i;
                         jstate = (j >= noStates) ? j - noStates : j;
                         if (istate != jstate) {
                             *(transProb++) = (*model_params)->trans_prob;
                         }
                         else {
-                            *(transProb++) = 0.5 - (*model_params)->trans_prob * (noStates - 1.0);
+                            *(transProb++) = 1.0 - (*model_params)->trans_prob * (noStates - 1.0);
                         }
                     }
                 }
@@ -182,21 +178,18 @@ void read_model(char *filename, ModelParams **model_params)
             fprintf(stderr, "Transitions must follow state descriptions.\n");
             exit(1);
         }
+
         while (fscanf(fp, " %s %lf", keyword, &value) == 2) {
-            if (strcmp(keyword, "mu_ratio=")==0) {
-                (*model_params)->mu_ratio = value;
-                fprintf(stderr, "mu_ratio is %lf\n", (*model_params)->mu_ratio);
+            if (strcmp(keyword, "mu=")==0) {
+                (*model_params)->mu = value;
+                fprintf(stderr, "mu is %lf\n", (*model_params)->mu);
             }
-            else if (strcmp(keyword, "sigma_ratio=")==0) {
-                (*model_params)->sigma_ratio = value;
-                fprintf(stderr, "sigma_ratio is %lf\n", (*model_params)->sigma_ratio);
+            else if (strcmp(keyword, "sigma=")==0) {
+                (*model_params)->sigma = value;
+                fprintf(stderr, "sigma is %lf\n", (*model_params)->sigma);
             }
             else if (strcmp(keyword, "rho_contam=")==0) {
                 (*model_params)->rho_contam = value;
-            }
-            else if (strcmp(keyword, "sigma_pi=")==0) {
-                (*model_params)->sigma_pi = value;
-                fprintf(stderr, "sigma_pi is %lf\n", (*model_params)->sigma_pi);
             }
             else {
                 fprintf(stderr, "Unrecognized keyword %s.\n", keyword);
@@ -214,18 +207,18 @@ void read_model(char *filename, ModelParams **model_params)
 void filter_highcopy_observations(ModelParams **model_params, Observation **observations)
 {
     int i, j, maxcopies, totalcopies, noStates, noskipped;
-    double maxdepth, thisdepth;
+    double maxdepth, thistumordepth, thisnormaldepth;
 
     if (parameters->maxratio == 0) {
         noStates = (*model_params)->N;
         maxcopies = 0;
-        for (i=0; i < 2*noStates; i++) {
+        for (i=0; i < noStates; i++) {
             totalcopies = (&(((*model_params)->states)[i]))->total;
             if (totalcopies > maxcopies) {
                 maxcopies = totalcopies;
             }
         }
-        maxdepth = maxcopies*(*model_params)->mu_ratio*0.5 + 3.0*(*model_params)->sigma_ratio;
+        maxdepth = maxcopies*(*model_params)->mu*0.5 + 3.0*(*model_params)->sigma;
     }
     else {
         maxdepth = parameters->maxratio;
@@ -235,8 +228,9 @@ void filter_highcopy_observations(ModelParams **model_params, Observation **obse
     noskipped = 0;
     j = 0; /* index of observations slot to be filled */
     for (i=0; i < (*model_params)->T; i++) {
-        thisdepth = (&(*observations)[i])->depthratio;
-        if (thisdepth > maxdepth) {
+        thistumordepth = (&(*observations)[i])->tumortotaldepth;
+        thisnormaldepth = (&(*observations)[i])->normaltotaldepth;
+        if (thistumordepth > maxdepth*thisnormaldepth) {
             /* fprintf(stderr, "Skipping observation with depth %lf\n", thisdepth); */
             noskipped++;
             continue;

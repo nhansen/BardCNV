@@ -32,71 +32,78 @@ extern Params *parameters;
 
 double run_baumwelch(ModelParams **model_params, Observation *observations)
 {
-    double **eprob; /* emission probabilities from each state with current parameters */
+    double **bprob; /* emission probabilities of B-allele freq from each state (param indep) */
+    double **eprob; /* emission probabilities for tumor read depth from each state with current parameters */
     double **alpha; /* "forward" variables (see Rabiner) */
     double **beta; /* "backward" variables (see Rabiner) */
     double **gamma; /* single-site state probabilities */
     double ***xi; /* two-site state probabilities */
     double initial_mll, final_mll, mll_diff, elogp, elogpnew;
-    double norm, sum, mu_ratio_num, mu_ratio_den, random_number;
-    double explow, exphigh, difflow, diffhigh;
-    double total_pialt_num, total_pialt_den, addend, eff_cn;
-    double sig_ratio_num, sig_ratio_den, small_sig_ratio_num, small_sig_ratio_den;
-    double derivative, last_mu_ratio, last_sig_ratio, last_sig_pi, rho_contam, new_diag;
+    double norm, sum, mu_num, mu_den, random_number, sigma_num, small_sigma_num, sigma_add;
+    double addend, cneff;
+    double derivative, last_mu, last_sigma, rho_contam, new_diag;
    
     StateData *thisstate; 
-    int i, j, istate, jstate, minor, total, bt_iterations;
+    int i, j, total, bt_iterations;
     long t;
 
     rho_contam = (*model_params)->rho_contam;
 
-    eprob = alloc_double_matrix((*model_params)->T, 2*(*model_params)->N);
-    alpha = alloc_double_matrix((*model_params)->T, 2*(*model_params)->N);
-    beta = alloc_double_matrix((*model_params)->T, 2*(*model_params)->N);
-    gamma = alloc_double_matrix((*model_params)->T, 2*(*model_params)->N);
+    bprob = alloc_double_matrix((*model_params)->T, (*model_params)->N);
+    eprob = alloc_double_matrix((*model_params)->T, (*model_params)->N);
+    alpha = alloc_double_matrix((*model_params)->T, (*model_params)->N);
+    beta = alloc_double_matrix((*model_params)->T, (*model_params)->N);
+    gamma = alloc_double_matrix((*model_params)->T, (*model_params)->N);
 
     if (parameters->fixtrans == 0) {
-        xi = alloc_double_tensor((*model_params)->T, 2*(*model_params)->N,
-                             2*(*model_params)->N);
+        xi = alloc_double_tensor((*model_params)->T, (*model_params)->N,
+                             (*model_params)->N);
     }
 
-    calc_eprobs(*model_params, observations, eprob);
-    calc_alphas(*model_params, observations, alpha, eprob, &final_mll);
+    calc_bprobs(*model_params, observations, bprob); /* binary emission probs--only need to calculate once */
+    calc_eprobs(*model_params, observations, eprob); /* will be recalculated with each iteration of BW */
+    calc_alphas(*model_params, observations, alpha, bprob, eprob, &final_mll);
+    calc_betas(*model_params, observations, beta, bprob, eprob);
     initial_mll = (1.0 - 2.0*TOL) * final_mll; /* to assure at least one iteration */
-    calc_betas(*model_params, observations, beta, eprob);
-    calc_gammas(*model_params, alpha, beta, gamma, eprob);
+    calc_gammas(*model_params, alpha, beta, gamma);
     if (parameters->fixtrans == 0) {
-        calc_xis(*model_params, alpha, beta, xi, eprob);
+        calc_xis(*model_params, alpha, beta, xi, bprob, eprob);
     }
 
     mll_diff = final_mll - initial_mll;
     bt_iterations = 0; 
+
+    /* pre-calculate numerator of most likely mu (of tumor read depth), */
+    /* since it is independent of state probabilities: */
+
+    mu_num = 0.0;
+    for (t = 0; t < (*model_params)->T; t++) {
+        mu_num += (double)(&(observations[t]))->tumortotaldepth;
+    }
+
+    fprintf(stderr, "Initial/final mll %lf %lf\n", initial_mll, final_mll);
+
     while ((mll_diff)/final_mll > TOL || (-1.0*mll_diff)/final_mll > TOL) {
 
         initial_mll = final_mll;
       
         /* store last */
-        last_mu_ratio = (*model_params)->mu_ratio; 
-        last_sig_ratio = (*model_params)->sigma_ratio; 
-        last_sig_pi = (*model_params)->sigma_pi; 
+        last_mu = (*model_params)->mu; 
+        last_sigma = (*model_params)->sigma; 
+
         /* expected value of log(P) */
-       
-        exp_log_prob(*model_params, observations, gamma, &elogp);
+        /* exp_log_prob(*model_params, observations, gamma, &elogp); */
 
         /* re-estimate */
         /* initial probabilities */
         for (i = 0; i < (*model_params)->N; i++) {
-            /* (*model_params)->pi[i] = 0.0001/(*model_params)->N + 0.9999*(gamma[0][i] + 
-                                            gamma[0][i + (*model_params)->N]); */
-            (*model_params)->pi[i] = gamma[0][i] + gamma[0][i + (*model_params)->N];
+            (*model_params)->pi[i] = gamma[0][i];
             
         }
 
         /* transition probabilities and sums for emission parameters */
-        total_pialt_num = 0.0;
-        total_pialt_den = 0.0;
-        mu_ratio_num = 0.0;
-        mu_ratio_den = 0.0;
+
+        mu_den = 0.0;
 
         /* first take care of transition probabilities */
         norm = 0.0;
@@ -105,9 +112,7 @@ double run_baumwelch(ModelParams **model_params, Observation *observations)
             if (parameters->fixtrans == 0) {
                 for (j = 0; j < (*model_params)->N; j++) {
                     for (t = 0; t < (*model_params)->T - 1; t++) {
-                        addend = xi[t][i][j] + xi[t][i + (*model_params)->N][j] +
-                                 xi[t][i][j + (*model_params)->N] +
-                                 xi[t][i + (*model_params)->N][j + (*model_params)->N];
+                        addend = xi[t][i][j];
                         if (j != i) {
                             sum += addend;
                         }
@@ -116,121 +121,84 @@ double run_baumwelch(ModelParams **model_params, Observation *observations)
                 }
             }
 
-            /* state info (for estimating ratio and pi_alt parameters) */
+            /* state info for estimating ratio and binomial parameters */
             thisstate = &(((*model_params)->states)[i]);
             total = thisstate->total;
-            minor = thisstate->minor;
-            explow = (rho_contam * 1.0 + (1.0 - rho_contam)*minor)/(rho_contam * 2.0 + (1.0 - rho_contam)*total);
-            exphigh = 1.0 - explow;
+            cneff = 2.0 * rho_contam + (1.0 - rho_contam) * total;
             
             for (t = 0; t < (*model_params)->T; t++) {
-                mu_ratio_num += (&(observations[t]))->depthratio *
-                       (gamma[t][i] + gamma[t][i + (*model_params)->N]);
-                mu_ratio_den += (gamma[t][i] + gamma[t][i + (*model_params)->N]) * (rho_contam + (1.0 - rho_contam)*total*0.5);
-
-                difflow = (&(observations[t]))->pi - explow;
-                diffhigh = (&(observations[t]))->pi - exphigh;
-                total_pialt_num += pow(difflow, 2) * gamma[t][i]/(explow*exphigh*4.0);
-                total_pialt_num += pow(diffhigh, 2) * 
-                                     gamma[t][i + (*model_params)->N] /
-                                     (explow * exphigh * 4.0);
-;
-    
-                total_pialt_den += gamma[t][i] + gamma[t][i + (*model_params)->N];
+                mu_den += gamma[t][i] * (cneff * 0.5)
+                                       * (&(observations[t]))->normaltotaldepth;
             }
         }
         if (parameters->fixtrans == 0) {
-            (*model_params)->trans_prob = 0.5 * sum / (norm * (((*model_params)->N) - 1.0));
+            (*model_params)->trans_prob = sum / (norm * (((*model_params)->N) - 1.0));
             fprintf(stderr, "New trans_prob value of %lf\n", (*model_params)->trans_prob);
             for (i = 0; i < (*model_params)->N; i++) {
                 for (j = 0; j < (*model_params)->N; j++) {
                     if (i != j) {
                         ((*model_params)->a)[i][j] = (*model_params)->trans_prob;
-                        ((*model_params)->a)[i+(*model_params)->N][j] = (*model_params)->trans_prob;
-                        ((*model_params)->a)[i][j+(*model_params)->N] = (*model_params)->trans_prob;
-                        ((*model_params)->a)[i+(*model_params)->N][j+(*model_params)->N] = (*model_params)->trans_prob;
                     }
                     else {
-                        new_diag = 0.5 - (*model_params)->trans_prob * 
+                        new_diag = 1.0 - (*model_params)->trans_prob * 
                                           ((*model_params)->N - 1.0);
                         ((*model_params)->a)[i][j] = new_diag;
-                        ((*model_params)->a)[i+(*model_params)->N][j] = new_diag;
-                        ((*model_params)->a)[i][j+(*model_params)->N] = new_diag;
-                        ((*model_params)->a)[i+(*model_params)->N][j+(*model_params)->N] = new_diag;
                     }
                 }
             }
         }
-        (*model_params)->mu_ratio = mu_ratio_num/mu_ratio_den;
-        fprintf(stderr, "New mu_ratio value of %lf\n", (*model_params)->mu_ratio);
+        (*model_params)->mu = mu_num/mu_den;
+        fprintf(stderr, "New mu value of %lf (num %lf, den %lf)\n", (*model_params)->mu, mu_num, mu_den);
 
-        (*model_params)->sigma_pi = sqrt(total_pialt_num/total_pialt_den);
-        fprintf(stderr, "New sigma_pi value of %lf\n", (*model_params)->sigma_pi);
-
-        sig_ratio_num = 0.0;
-        sig_ratio_den = 0.0;
-        small_sig_ratio_num = 0.0;
-        small_sig_ratio_den = 0.0;
+        sigma_num = 0.0;
+        small_sigma_num = 0.0;
         for (i = 0; i < (*model_params)->N; i++) {
-            /* state info (for estimating ratio parameters) */
+
             thisstate = &(((*model_params)->states)[i]);
             total = thisstate->total;
 
-            eff_cn = rho_contam + (1.0 - rho_contam) * total/2.0;
+            cneff = 2.0 * rho_contam + (1.0 - rho_contam) * total;
            
             for (t = 0; t < (*model_params)->T; t++) {
-                addend = pow( (&(observations[t]))->depthratio -
-                              eff_cn*(*model_params)->mu_ratio, 2) *
-                              (gamma[t][i] + gamma[t][i + (*model_params)->N])/eff_cn;
-                if (sig_ratio_num == 0.0 || addend/sig_ratio_num > 0.000000001) {
-                    sig_ratio_num += addend;
+                addend = pow( ( (&(observations[t]))->tumortotaldepth -
+                    cneff*(&(observations[t]))->normaltotaldepth*(*model_params)->mu/2.0 ), 2) *
+                              gamma[t][i] / ( cneff * (&(observations[t]))->normaltotaldepth );
+                if (sigma_num == 0.0 || addend/sigma_num > 0.000000001) {
+                    sigma_num += addend;
                 }
                 else { /* aggregate small terms */
-                    small_sig_ratio_num += addend;
-                }
-
-                addend = gamma[t][i] + gamma[t][i + (*model_params)->N];
-
-                if (sig_ratio_den == 0.0 || addend/sig_ratio_den > 0.000000001) {
-                    sig_ratio_den += addend;
-                }
-                else {
-                    small_sig_ratio_den += addend;
+                    small_sigma_num += addend;
                 }
             }
         }
 
-        /* fprintf(stderr, "Muratio num %lf + %lf, den %lf + %lf\n", sig_ratio_num, small_sig_ratio_num, sig_ratio_den, small_sig_ratio_den); */
-        (*model_params)->sigma_ratio = sqrt((sig_ratio_num + small_sig_ratio_num) /
-                                        (sig_ratio_den + small_sig_ratio_den));
-        fprintf(stderr, "New sigma_ratio value of %lf\n", (*model_params)->sigma_ratio);
+        (*model_params)->sigma = sqrt(2.0 * (sigma_num + small_sigma_num) / (*model_params)->T);
+        fprintf(stderr, "New sigma value of %lf\n", (*model_params)->sigma);
 
         if (parameters->derivatives != 0) {
             /* This section is an optional derivative check to assure precision is still good */
-            dbaum_dmuratio(*model_params, observations, gamma, &derivative);
-            fprintf(stderr, "Muratio derivative is %lf\n", derivative);
-            dbaum_dsigratio(*model_params, observations, gamma, &derivative);
-            fprintf(stderr, "Sigratio derivative is %lf\n", derivative);
-            dbaum_dsigpi(*model_params, observations, gamma, &derivative);
-            fprintf(stderr, "Sigpi derivative is %lf\n", derivative);
+            dbaum_dmu(*model_params, observations, gamma, &derivative);
+            fprintf(stderr, "Mu derivative is %lf\n", derivative);
+            dbaum_dsigma(*model_params, observations, gamma, &derivative);
+            fprintf(stderr, "Sig derivative is %lf\n", derivative);
             if (parameters->fixtrans == 0) {
                 dbaum_dtransprob(*model_params, observations, xi, &derivative);
                 fprintf(stderr, "Transprob derivative is %lf\n", derivative);
             }
     
-            exp_log_prob(*model_params, observations, gamma, &elogpnew);
-            if (elogpnew < elogp) {
+            /* exp_log_prob(*model_params, observations, gamma, &elogpnew); */
+            /* if (elogpnew < elogp) {
                 fprintf(stderr, "LOWER EXPECTED PROB!!!!\n");
             }
-            fprintf(stderr, "New/Old expected logp values with old states: %lf, %lf\n", elogp, elogpnew);
+            fprintf(stderr, "New/Old expected logp values with old states: %lf, %lf\n", elogp, elogpnew); */
         }
 
         calc_eprobs(*model_params, observations, eprob);
-        calc_alphas(*model_params, observations, alpha, eprob, &final_mll);
-        calc_betas(*model_params, observations, beta, eprob);
-        calc_gammas(*model_params, alpha, beta, gamma, eprob);
+        calc_alphas(*model_params, observations, alpha, bprob, eprob, &final_mll);
+        calc_betas(*model_params, observations, beta, bprob, eprob);
+        calc_gammas(*model_params, alpha, beta, gamma);
         if (parameters->fixtrans == 0) {
-            calc_xis(*model_params, alpha, beta, xi, eprob);
+            calc_xis(*model_params, alpha, beta, xi, bprob, eprob);
         }
 
         mll_diff = final_mll - initial_mll;
@@ -241,17 +209,15 @@ double run_baumwelch(ModelParams **model_params, Observation *observations)
             while (mll_diff < 0) {
                 fprintf(stderr, "ERROR!!!BACKTRACKING: MLL difference: %lf (%lf, %lf)\n", mll_diff, initial_mll, final_mll);
                 random_number = (rand() / (double)RAND_MAX - 0.5) * 0.0001;
-                (*model_params)->mu_ratio = last_mu_ratio + random_number;
+                (*model_params)->mu = last_mu + random_number;
                 random_number = (rand() / (double)RAND_MAX - 0.5) * 0.0001;
-                (*model_params)->sigma_ratio = last_sig_ratio + random_number;
-                random_number = (rand() / (double)RAND_MAX - 0.5) * 0.0001;
-                (*model_params)->sigma_pi = last_sig_pi + random_number;
+                (*model_params)->sigma = last_sigma + random_number;
                 calc_eprobs(*model_params, observations, eprob);
-                calc_alphas(*model_params, observations, alpha, eprob, &final_mll);
-                calc_betas(*model_params, observations, beta, eprob);
-                calc_gammas(*model_params, alpha, beta, gamma, eprob);
+                calc_alphas(*model_params, observations, alpha, bprob, eprob, &final_mll);
+                calc_betas(*model_params, observations, beta, bprob, eprob);
+                calc_gammas(*model_params, alpha, beta, gamma);
                 if (parameters->fixtrans == 0) {
-                    calc_xis(*model_params, alpha, beta, xi, eprob);
+                    calc_xis(*model_params, alpha, beta, xi, bprob, eprob);
                 }
                 mll_diff = final_mll * TOL + 1;
                 bt_iterations++;
@@ -266,106 +232,162 @@ double run_baumwelch(ModelParams **model_params, Observation *observations)
     }
 
     /* free memory */
+    free_double_matrix(bprob, (*model_params)->T);
     free_double_matrix(eprob, (*model_params)->T);
     free_double_matrix(alpha, (*model_params)->T);
     free_double_matrix(beta, (*model_params)->T);
     free_double_matrix(gamma, (*model_params)->T);
     if (parameters->fixtrans == 0) {
-        free_double_tensor(xi, (*model_params)->T, 2*(*model_params)->N);
+        free_double_tensor(xi, (*model_params)->T, (*model_params)->N);
     }
 
     return final_mll;
 }
 
-/* pre-calculate the probability of an observation from a particular state at a particular time */
+/* pre-calculate the probability of the observed number of alternate allele reads, given the total tumor read depth from a particular state at a particular time */
 
-void calc_eprobs(ModelParams *model_params, Observation *observations, double **eprob) {
-    int i, t, istate, isig, minor, total;
-    double logratioprob, logaltprob, sumlogs;
-    double gaussnorm, rho_contam, exp_pi, exp_picontam;
-    double *statenorm;
+void calc_bprobs(ModelParams *model_params, Observation *observations, double **bprob) {
+    int i, total, minor;
+    long t;
+    long tumordepth, altdepth;
+    double rho_contam, abinaryprob, bbinaryprob;
+    double *propeff; /* expected proportion of B-allele, given contamination, for a state */
     StateData *state;
 
-    /* extra factor for normalization of Gaussian densities */    
-    gaussnorm = 1.0/(4.0*3.14159*model_params->sigma_pi*model_params->sigma_ratio);
-
     rho_contam = model_params->rho_contam;
-    /* pre-calculate normalization factor for each different state: */
+   
+    propeff = alloc_double_vector(model_params->N);
+
+    /* pre-calculate expected ratios for each state */ 
+    for (i = 0; i < model_params->N; i++) {
+        state = &((model_params->states)[i]);
+        total = state->total;
+        minor = state->minor;
+        propeff[i] = (rho_contam + (1.0-rho_contam)*minor)/(2.0*rho_contam + (1.0-rho_contam)*total);
+
+        for (t=0; t < model_params->T; t++) {
+            tumordepth = (&(observations[t]))->tumortotaldepth;
+            altdepth = (&(observations[t]))->tumoraltdepth;
+            
+            binprob(altdepth, tumordepth, propeff[i], &bbinaryprob);
+            binprob(altdepth, tumordepth, 1.0 - propeff[i], &abinaryprob);
+
+            /* fprintf(stderr, "Calculated probs %lf %lf for depth %d out of %d with prob %lf\n", bbinaryprob, abinaryprob, altdepth, tumordepth, propeff[i]); */
+            bprob[t][i] = 0.5*(abinaryprob + bbinaryprob);
+            if (isnan(bprob[t][i])) {
+                fprintf(stderr, "brob is not a number at t=%ld, state %d!\n", t, i);
+                exit(1);
+            }
+            if (bprob[t][i] <= 0.00001) {
+                fprintf(stderr, "Setting bprob to 0.00001 at %ld for state %d, tumoralt %ld, tumortotal %ld (prop=%lf)\n", t, i, altdepth, tumordepth, propeff[i]);
+                bprob[t][i] = 0.00001;
+
+            }
+            if (bprob[t][i] > 1.0) {
+                fprintf(stderr, "bprob is greater than 1.0 at t=%ld, state %d (tumor %ld, normal %ld, prop %lf) probability; %lf!\n", t, i, tumordepth, altdepth, propeff[i], bprob[t][i]);
+                exit(1);
+            }
+        }
+
+        /* fprintf(stderr, "Finished setting binary probabilities for state %d.\n", i); */
+    }
+
+    /* check for probable states */
+
+    /* for (t=0; t < model_params->T; t++) {
+        bbinaryprob = 0;
+        for (i = 0; i < model_params->N; i++) {
+            if (bprob[t][i] > bbinaryprob) {
+                bbinaryprob = bprob[t][i];
+            }
+        }
+
+        fprintf(stderr, "Highest binary probability %lf at t=%d\n", bbinaryprob, t);
+    } */
+}
+
+/* pre-calculate the probability of the tumor read depth observation from a particular state at a particular time */
+
+void calc_eprobs(ModelParams *model_params, Observation *observations, double **eprob) {
+    int i, total;
+    long t;
+    long tumordepth, normaldepth;
+    double mu, sigma, rho_contam;
+    double gaussnorm, logprob;
+    double *statenorm, *cneff;
+    StateData *state;
+
+    mu = model_params->mu;
+    sigma = model_params->sigma;
+    rho_contam = model_params->rho_contam;
+
+    /* extra factor for normalization of Gaussian densities */    
+    gaussnorm = 1.0/sqrt(3.14159)/sigma; /* will include cneff and normaltotaldepth later */
+
+    /* pre-calculate normalization factor and effective copy number for each different state: */
     statenorm = alloc_double_vector(model_params->N);
+    cneff = alloc_double_vector(model_params->N);
 
     for (i = 0; i < model_params->N; i++) {
         state = &((model_params->states)[i]);
-        minor = state->minor;
         total = state->total;
+        cneff[i] = 2.0*rho_contam + (1.0-rho_contam)*total;
 
-        exp_picontam = (rho_contam * 1.0 + (1.0 - rho_contam)*minor)/(rho_contam * 2.0 + (1.0 - rho_contam)*total);
-        statenorm[i] = gaussnorm/sqrt(exp_picontam * (1.0 - exp_picontam));
-        statenorm[i] /= sqrt(rho_contam + 0.5*(1.0 - rho_contam)*total);
-        /* fprintf(stderr, "State norm for state %d is %lf\n", i, statenorm[i]); */
+        statenorm[i] = gaussnorm/sqrt(cneff[i]);
     }
 
     for (t = 0; t < model_params->T; t++) {
-        for (i = 0; i < 2*model_params->N; i++) {
-            istate = (i >= model_params->N) ? i - model_params->N : i;
-            isig = (i >= model_params->N) ? 1 : -1;
-            ratio_log_prob(model_params, observations[t], istate, &logratioprob);
-            altfreq_log_prob(model_params, observations[t], istate, isig, &logaltprob);
-            sumlogs = logratioprob + logaltprob;
-            if ((sumlogs < 0.0000001 * abs(logratioprob) && 
-                           sumlogs > -0.0000001 * abs(logratioprob)) ||
-                (sumlogs < 0.0000001 * abs(logaltprob) && 
-                           sumlogs > -0.0000001 * abs(logaltprob))) {
-                fprintf(stderr, "Loss of precision in calculating eprobs at t=%ld for state %d/%d\n", t, istate, isig);
-                exit (1); 
-            }
-            if (logratioprob + logaltprob < parameters->minexparg) {
-                /* fprintf(stderr, "Setting eprob to 0.0 at %ld for state %d/%d (%lf, %lf)\n", t, istate, isig, logratioprob, logaltprob); */
+        tumordepth = (&(observations[t]))->tumortotaldepth;
+        normaldepth = (&(observations[t]))->normaltotaldepth;
+        for (i = 0; i < model_params->N; i++) {
+            logprob = pow((1.0*tumordepth - mu*cneff[i]*normaldepth/2.0), 2);
+            logprob = -1.0*logprob/(normaldepth*cneff[i]*pow(sigma, 2));
+            if (logprob < parameters->minexparg) {
+                fprintf(stderr, "Setting eprob to 0.0 at %ld for state %d, normal %ld, tumor %ld (mu=%lf, sigma=%lf, cneff=%lf)\n", t, i, normaldepth, tumordepth, mu, sigma, cneff[i]);
                 eprob[t][i] = 0.0;
             }
             else {
-                eprob[t][i] = exp(logratioprob + logaltprob) * statenorm[istate];
+                eprob[t][i] = exp(logprob) * statenorm[i] / sqrt(normaldepth);
             }
         }
     }
     free_double_vector(statenorm);
+    free_double_vector(cneff);
     /* fprintf(stderr, "Done with eprobs\n"); */
 }
 
-void calc_gammas(ModelParams *model_params, double **alpha, double **beta, double **gamma, double **eprob) {
+void calc_gammas(ModelParams *model_params, double **alpha, double **beta, double **gamma) {
     int i, j;
-    int t;
-    double norm, sum;
+    long t;
+    double norm;
 
     for (t = 0; t < model_params->T; t++) {
         norm = 0.0;
-        for (j = 0; j < 2*model_params->N; j++) {
+        for (j = 0; j < model_params->N; j++) {
             gamma[t][j] = alpha[t][j] * beta[t][j];
             norm += gamma[t][j];
         }
-        sum = 0.0;
-        for (j = 0; j < 2*model_params->N; j++) {
+        for (j = 0; j < model_params->N; j++) {
             gamma[t][j] /= norm;
-            sum += gamma[t][j];
         }
     }
-    /* fprintf(stderr, "Done with gamma, sum %lf\n", sum); */
 }
 
-void calc_xis(ModelParams *model_params, double **alpha, double **beta, double ***xi, double **eprob) {
+void calc_xis(ModelParams *model_params, double **alpha, double **beta, double ***xi, double **bprob, double **eprob) {
     int i, j;
-    int t;
+    long t;
     double norm;
 
     for (t = 0; t < model_params->T - 1; t++) {
         norm = 0.0;
-        for (i = 0; i < 2*model_params->N; i++) {
-            for (j = 0; j < 2*model_params->N; j++) {
-                xi[t][i][j] = alpha[t][i] * beta[t+1][j] * model_params->a[i][j] * eprob[t+1][j];
+        for (i = 0; i < model_params->N; i++) {
+            for (j = 0; j < model_params->N; j++) {
+                xi[t][i][j] = alpha[t][i] * beta[t+1][j] * model_params->a[i][j] * bprob[t+1][j] * eprob[t+1][j];
                 norm += xi[t][i][j];
             }
         }
-        for (i = 0; i < 2*model_params->N; i++) {
-            for (j = 0; j < 2*model_params->N; j++) {
+        for (i = 0; i < model_params->N; i++) {
+            for (j = 0; j < model_params->N; j++) {
                 xi[t][i][j] /= norm;
                 /* fprintf(stdout, "XI: %d %d %lf\n", i, j, xi[t][i][j]); */
             }

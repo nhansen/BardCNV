@@ -41,7 +41,7 @@ void get_params(argc, argv)
     parameters->nobins = 100; /* for plotting log likelihoods */
     parameters->fixtrans = 0; /* option to skip optimization of transition probs */
     parameters->derivatives = 0; /* option to calculate derivatives with respect to parameters */
-    parameters->maxratio = 0; /* option to limit observations to those having a given maximum ratio */
+    parameters->maxratio = 0; /* option to limit observations to those having a given maximum ratio of tumortotaldepth to normaltotaldepth */
 
     if (argc > 1 && argv[1][0] != '-') {
         parameters->program = (char *) malloc((strlen(argv[1]) + 1) * sizeof(char));

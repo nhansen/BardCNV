@@ -30,18 +30,18 @@ extern Params *parameters;
 
 /* "forward" procedure */
 
-void calc_alphas(ModelParams *model_params, Observation *observations, double **alpha, double **eprob, double *mll) {
+void calc_alphas(ModelParams *model_params, Observation *observations, double **alpha, double **bprob, double **eprob, double *mll) {
 
-    int i, j, t;
+    int i, j;
+    long t;
     double norm, sum;
 
     /* Initialization */
     norm = 0.0;
     for (i = 0; i < model_params->N; i++) {
 
-        alpha[0][i] = 0.5*model_params->pi[i] * eprob[0][i];
-        alpha[0][i + model_params->N] = 0.5*model_params->pi[i] * eprob[0][i + model_params->N];
-        norm += alpha[0][i] + alpha[0][i + model_params->N];
+        alpha[0][i] = model_params->pi[i] * bprob[0][i] * eprob[0][i];
+        norm += alpha[0][i];
     }
 
     if (norm <= 0.0) {
@@ -50,43 +50,45 @@ void calc_alphas(ModelParams *model_params, Observation *observations, double **
         alpha[0][0] = 1.0;
     }
 
-    for (i = 0; i < 2*model_params->N; i++) {
+    for (i = 0; i < model_params->N; i++) {
         alpha[0][i] /= norm;
     }
 
-    *mll = log(norm);
-    /* fprintf(stderr, "After initialization %lf\n", *mll); */
+    *mll = log(norm); /* will keep a running sum */
+    fprintf(stderr, "Initial forward, mll=%lf, norm=%lf\n", *mll, norm);
 
     /* Induction */
     for (t = 0; t < model_params->T - 1; t++) {
         norm = 0.0;
-        for (j = 0; j < 2*model_params->N; j++) {
+        for (j = 0; j < model_params->N; j++) {
             sum = 0.0;
-            for (i = 0; i < 2*model_params->N; i++) {
+            for (i = 0; i < model_params->N; i++) {
                 sum += alpha[t][i] * model_params->a[i][j];
             }
-            alpha[t + 1][j] = sum * eprob[t+1][j];
+            alpha[t + 1][j] = sum * bprob[t+1][j] * eprob[t+1][j];
             norm += alpha[t + 1][j];
+            /* fprintf(stderr, "Time %ld state %d, alpha=%lf\n", t, j, alpha[t+1][j]); */
         }
         if (norm <= 0.0) {
-            fprintf(stderr, "Underflow in alphas at t=%d--assigning all probability to 0 state.\n", t);
+            fprintf(stderr, "Underflow in alphas at t=%d (bprob %lf, eprob %lf)--assigning all probability to 0 state.\n", t, bprob[t+1][0], eprob[t+1][0]);
             norm = 1.0;
             alpha[t+1][0] = 1.0;
         }
         sum = 0.0;
-        for (j = 0; j < 2*model_params->N; j++) {
+        for (j = 0; j < model_params->N; j++) {
             alpha[t + 1][j] /= norm;
             sum += alpha[t + 1][j];
         }
         if (sum < 0.99 || sum > 1.01) {
-            fprintf(stderr, "Ineffective normalization, resulting in sum %lf (norm %lf), at t=%d\n", sum, norm, t + 1);
+            fprintf(stderr, "Ineffective normalization, resulting in sum %lf (norm %lf), at t=%ld\n", sum, norm, t + 1);
         }
-        if (norm <=0) {
+        if (norm <=0.0) {
             fprintf(stderr, "Zero norm for states at t=%d!\n", t);
             exit(1);
         }
         *mll += log(norm);
+        /* fprintf(stderr, "Time %ld forward, mll=%lf, norm=%lf, sum=%lf\n", t, *mll, norm, sum); */
     }
-    /* fprintf(stderr, "Done with forward\n"); */
+    fprintf(stderr, "Done with forward, mll=%lf\n", *mll);
 }
 

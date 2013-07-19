@@ -15,7 +15,7 @@ $VERSION = sprintf "%.4f", substr( q$Rev: 0$, 4 ) / 10000;
 
 =head1 NAME
 
-bardCNV.pl - given a file of heterozygous positions (in the normal sample), train the parameters and solve for the states of a hidden Markov model to predict copy number state in a tumor sample.
+bardCNV.pl - given a file of heterozygous positions (in a normal diploid sample), set the parameters and solve for the states of a hidden Markov model to predict copy number state in a matched tumor sample.
 
 =head1 SYNOPSIS
 
@@ -24,7 +24,7 @@ bardCNV.pl - given a file of heterozygous positions (in the normal sample), trai
 
 =head1 DESCRIPTION
 
-Using B-allele frequencies within sequence from a tumor sample, and the ratio of tumor to normal sequencing read depth, bardCNV.pl predicts copy number (including the counts of both alleles) using an HMM trained on these two features.  The program requires a list of high-confidence sites which are believed to be diploid and heterozygous in the normal samples.  For these sites, the B-allele frequency in the tumor sample helps bardCNV to pin down the ratio of the major to minor copy number allele.  In addition, the training (via Baum-Welch) predicts the absolute ploidy of the sample using data from the whole genome.
+Using B-allele frequencies within sequence from a tumor sample, and the depth of coverage of the tumor compared to normal sequencing read depth, bardCNV.pl predicts copy number (including the copy counts of both alleles) using an HMM trained on these two features.  The program requires a list of high-confidence sites which are believed to be diploid and heterozygous in the normal sample.  For these sites, the B-allele frequency in the tumor sample helps bardCNV to pin down the ratio of the major to minor copy number allele, and thus helps to determine the overall ploidy, and optionally, the purity level of the tumor sample.
 
 =cut
 
@@ -32,9 +32,9 @@ Using B-allele frequencies within sequence from a tumor sample, and the ratio of
 # Begin MAIN
 #------------
 
-$ENV{'PATH'} = "/home/nhansen/projects/bard/scripts:/home/nhansen/projects/bard/c:/home/nhansen/projects/bamcounts:$ENV{PATH}";
+$ENV{'PATH'} = "/home/nhansen/projects/bard_binomial/bard/scripts:/home/nhansen/projects/bard_binomial/bard/c:/home/nhansen/projects/bamcounts:$ENV{PATH}";
 
-my $plotstates_rlib = "/home/nhansen/projects/bard/R/plot_states.R";
+my $plotstates_rlib = "/home/nhansen/projects/bard_binomial/bard/R/plot_states.R";
 
 process_commandline();
 
@@ -44,6 +44,7 @@ my $best_param_file = train_model($workdir, $train_observable_file);
 my $state_file = run_viterbi($workdir, $state_observable_file, $best_param_file);
 my $vcf_file = write_vcf($workdir, $state_observable_file, $state_file);
 my $stats_file = calc_stats_file($workdir, $state_file);
+
 if ($Opt{'plots'}) {
     my $plotdir = draw_plots($workdir, $best_param_file, $state_file);
 }
@@ -55,7 +56,7 @@ if ($Opt{'plots'}) {
 sub process_commandline {
     # Set defaults here
     %Opt = ( mindepth => 0 , maxcopies => 8, transprob => 0.0001, countopts => '',
-             sigratio => 0.30, contam => 0.01, sigpi => 0.15, maxviterbicopies => 24,
+             sigratio => 1.00, contam => 0.01, sigpi => 0.15, maxviterbicopies => 24,
              mincontam => 0.01, maxcontam => 0.5 );
     GetOptions(
         \%Opt, qw(
@@ -146,8 +147,8 @@ sub create_observable_files {
     
     my $rh_norm_count = {};
     my $rh_tumor_count = {};
-    my $rh_alt_ratio = {};
-    my $rh_alt_allele = {};
+    my $rh_alt_count = {}; # the number of reads displaying the alternate allele in the tumor
+    my $rh_alt_allele = {}; # this will be the non-reference allele which is present in the most reads in the normal
 
     my @normal_count_files = ($Opt{'trio'}) ? ("$workdir/mombam.counts", "$workdir/dadbam.counts") :
                                               ("$workdir/normalbam.counts");
@@ -165,7 +166,7 @@ sub create_observable_files {
                 $base_counts{'C'} = $C_count + $c_count;
                 $base_counts{'G'} = $G_count + $g_count;
 
-                # add in coverage, multiplying by two if this is a dad in a trio:
+                # add in coverage, multiplying by two if this is a dad on the X chrom in a trio:
                 my $multiplier = 1;
                 if (($Opt{'trio'}) && ($normal_file eq "$workdir/dadbam.counts") && 
                                  ($chr =~ /x/i) && (nonpar_xpos($pos))) {
@@ -175,9 +176,8 @@ sub create_observable_files {
                 $rh_norm_count->{$chr}->{$pos} += $multiplier * ($base_counts{'A'} + $base_counts{'T'} + 
                                                         $base_counts{'G'} + $base_counts{'C'});
         
-                my $ref_count = $base_counts{$ref};
                 if (!$Opt{'trio'}) {
-                    delete $base_counts{$ref}; # for trios, only one sample will display alternate allele
+                    delete $base_counts{$ref}; # for trios, only one sample will display alternate allele, so don't want to record wrong alternate allele
                 }
         
                 my @sorted_bases = sort {$base_counts{$b} <=> $base_counts{$a}} keys %base_counts;
@@ -215,7 +215,7 @@ sub create_observable_files {
                 next;
             }
     
-            $rh_alt_ratio->{$chr}->{$pos} = ($ref_count + $alt_count) ? $alt_count/($ref_count + $alt_count) : 0.5;
+            $rh_alt_count->{$chr}->{$pos} = $alt_count;
         }
     }
     close TUMOR;
@@ -234,12 +234,11 @@ sub create_observable_files {
             my $tumor_reads = ($rh_tumor_count->{$chr} && $rh_tumor_count->{$chr}->{$pos}) ? $rh_tumor_count->{$chr}->{$pos} : 0;
             next if ($normal_reads + $tumor_reads < $Opt{'mindepth'});
             next if (!$normal_reads);
-            my $rdr = $tumor_reads/$normal_reads;
-            my $alt_freq = ($rh_alt_ratio->{$chr} && defined($rh_alt_ratio->{$chr}->{$pos})) ? $rh_alt_ratio->{$chr}->{$pos} : 0.5;
+            my $alt_count = ($rh_alt_count->{$chr} && defined($rh_alt_count->{$chr}->{$pos})) ? $rh_alt_count->{$chr}->{$pos} : 0;
             if ((!@omit_entries || !grep {$_ eq $chr} @omit_entries) && ($chr !~ /X/ || !$Opt{'male'} )) {
-                print TRAINOBS "$chr\t$pos\t$rdr\t$alt_freq\n";
+                print TRAINOBS "$chr\t$pos\t$normal_reads\t$tumor_reads\t$alt_count\n";
             }
-            print STATEOBS "$chr\t$pos\t$rdr\t$alt_freq\n";
+            print STATEOBS "$chr\t$pos\t$normal_reads\t$tumor_reads\t$alt_count\n";
         }
     }
     close STATEOBS;
@@ -252,22 +251,27 @@ sub train_model {
     my $workdir = shift;
     my $obs_file = shift;
 
-    # look for maximum of the read depth ratio distribution:
+    # calculate mean of tumor read count distribution:
     open OBS, $obs_file
         or die "Couldn\'t open $obs_file: $!\n";
-    my $rh_ratio_hist = {};
+    my $total_ratio = 0.0;
+    my $datapoints = 0;
     while (<OBS>) {
-        if (/^(\S+)\s(\d+)\s(\S+)/) { # read depth is third column
-            my $ratio = $3;
-            my $ratio_bin = int(100*$ratio)/100;
-            $rh_ratio_hist->{$ratio_bin}++;
+        if (/^(\S+)\s(\d+)\s(\d+)\s(\d+)/) { # read depth ratio is fourth divided by third column
+            my ($normal_depth, $tumor_depth) = ($3, $4);
+            if (!$normal_depth) {
+                die "Normal depth of coverage is $normal_depth at $1:$2--this shouldn\'t happen!\n";
+            }
+           
+            my $ratio = $tumor_depth/$normal_depth; 
+            $total_ratio += $ratio;
+            $datapoints++;
         }
     }
     close OBS;
-    my @sorted_bins = sort {$rh_ratio_hist->{$b} <=> $rh_ratio_hist->{$a}} keys %{$rh_ratio_hist};
-    my $max_bin = $sorted_bins[0];
-    print STDERR "Most common read depth ratio: $max_bin\n";
-    my @muratio_vals = ($max_bin/4.0, $max_bin/3.0, $max_bin/2.0, 2.0*$max_bin/3.0, $max_bin, 2.0*$max_bin);
+    my $ratio_avg = $total_ratio/$datapoints;
+    print STDERR "Mean read depth ratio: $ratio_avg\n";
+    my @muratio_vals = ($ratio_avg/4.0, $ratio_avg/3.0, $ratio_avg/2.0, 2.0*$ratio_avg/3.0, $ratio_avg, 2.0*$ratio_avg);
     my @contam_vals = ();
     if ($Opt{'optcontam'}) {
         for (my $thiscontam = $Opt{'mincontam'}; $thiscontam <= $Opt{'maxcontam'}; $thiscontam+= 0.01) {
@@ -289,9 +293,9 @@ sub train_model {
                         or die "Couldn\'t create $workdir/train_$muratio_string\_$contamval: $!\n";
                 }
                 write_train_start_file("$workdir/train_$muratio_string\_$contamval/train_start.txt", $muratio, $contamval); 
-                my $maxratio_opt = $max_bin*6.0;
+                my $maxratio_opt = $ratio_avg * 4.0;
                 my $fix_opt = ($Opt{'fixedtrans'}) ? '-fixtrans' : '';
-                my $train_cmd = "bardcnv baumwelch -obsfile $obs_file -modelfile $workdir/train_$muratio_string\_$contamval/train_start.txt $fix_opt -maxratio $maxratio_opt > $workdir/train_$muratio_string\_$contamval/train.out 2>$workdir/train_$muratio_string\_$contamval/train.err";
+                my $train_cmd = "bardcnv baumwelch -derivatives -obsfile $obs_file -modelfile $workdir/train_$muratio_string\_$contamval/train_start.txt $fix_opt -maxratio $maxratio_opt > $workdir/train_$muratio_string\_$contamval/train.out 2>$workdir/train_$muratio_string\_$contamval/train.err";
                 push @train_commands, $train_cmd;
             }
             push @output_files, "$workdir/train_$muratio_string\_$contamval/train.out";
@@ -359,10 +363,9 @@ sub write_train_start_file {
     }
 
     print START "Transprob= $Opt{'transprob'}\n";
-    print START "mu_ratio= $muratio\n";
-    print START "sigma_ratio= $Opt{'sigratio'}\n";
+    print START "mu= $muratio\n";
+    print START "sigma= $Opt{'sigratio'}\n";
     print START "rho_contam= $contamval\n";
-    print START "sigma_pi= $Opt{'sigpi'}\n";
 
     close START;
 }
@@ -393,7 +396,7 @@ sub run_viterbi {
     open NEWTRAIN, ">$viterbi_param_file"
         or die "Couldn\'t open $viterbi_param_file for writing: $!\n";
 
-    print "Opening file $viterbi_param_file for writing high copy nubmer model params.\n";
+    print "Opening file $viterbi_param_file for writing high copy number model params.\n";
 
     my @state_lines = ();
     while (<TRAIN>) {
@@ -462,9 +465,9 @@ sub calc_stats_file {
     open STATES, $state_file
         or die "Couldn\'t open $state_file: $!\n";
     while (<STATES>) {
-        if (/^(\S+)\s(\d+)\s(\S+)\s(\S+)\s(\d+)\s(\d+)\s(\d+)$/) {
+        if (/^(\S+)\s(\d+)\s(\S+)\s(\S+)\s(\S+)\s(\d+)\s(\d+)\s(\d+)$/) {
             my $chr = $1;
-            my $score = $7;
+            my $score = $8;
             $all_chroms{$chr} = 1;
             $rh_qual_stats->{$chr}->{'total'} = 0 if (! (defined ($rh_qual_stats->{$chr}->{'total'})));
             $rh_qual_stats->{$chr}->{'60'} = 0 if (! (defined ($rh_qual_stats->{$chr}->{'60'})));
@@ -500,7 +503,7 @@ sub draw_plots {
 
     mkdir("$workdir/plots");
 
-    my $muratio = `grep 'mu_ratio=' $param_file | awk '{print \$2}'`;
+    my $muratio = `grep 'mu=' $param_file | awk '{print \$2}'`;
     chomp $muratio;
     my $contam = `grep 'rho_contam=' $param_file | awk '{print \$2}'`;
     chomp $contam;
@@ -685,7 +688,7 @@ Do not optimize the state transition probabilities using Baum-Welch.  Often, all
 
 =item B<--sigratio>
 
-Specify the starting value for the standard deviation of the (Gaussian distributed) ratio of depth of coverage in the tumor sequence to depth of coverage in the normal sequence (default 0.30).
+Specify the starting value for the standard deviation of the (Gaussian distributed) ratio of depth of coverage in the tumor sequence to depth of coverage in the normal sequence (default 1.00).
 
 =item B<--sigpi>
 

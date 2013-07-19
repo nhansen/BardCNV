@@ -28,149 +28,89 @@
 
 extern Params *parameters;
 
-void ratio_log_prob(ModelParams *model_params, Observation obs, int i, double *ans)
-{
-    StateData *state;
-    int total;
-    double depthratio;
-    double mu_ratio, sigma_ratio, rho_contam;
-    double log_prob, diff;
+/* binomial probabilities */
 
-    depthratio = (&obs)->depthratio;
+double binprob(long successes, long trials, double probsuccess, double *pbin) {
 
-    state = &((model_params->states)[i]);
-    total = state->total;
+    long i, high;
+    double combprod, logcombprod, logpbin;
 
-    mu_ratio = model_params->mu_ratio;
-    sigma_ratio = model_params->sigma_ratio;
-    rho_contam = model_params->rho_contam;
+    if (trials - successes > successes) {
+        high = successes;
+    }
+    else {
+        high = trials - successes;
+    }
+    combprod = 1.0;
+    logcombprod = 0.0;
+    for (i = 0; i < high; i++) {
+        combprod *= (double) (trials - i);
+        combprod /= (double) (i + 1);
+        combprod *= probsuccess * (1.0 - probsuccess);
+        logcombprod += log(1.0*(trials - i)) - log(1.0*(i + 1)) + 
+                     log(probsuccess) + log(1.0 - probsuccess);
+    }
 
-    log_prob = 0.0;
-    diff = depthratio - ( (1.0 - rho_contam)*total/2.0 + rho_contam ) * mu_ratio;
-    log_prob -= 0.5*(diff*diff)/((rho_contam + (1.0 - rho_contam)*total/2.0) * 
-                            sigma_ratio*sigma_ratio);
+    /* *pbin = combprod * pow(probsuccess, successes-high) * pow(1.0-probsuccess, trials-successes-high); */
 
-    /*fprintf(stderr, "State %d, ratio %lf logprob %lf\n", i, depthratio, log_prob); */
-    *ans = log_prob;
-}
-
-void altfreq_log_prob(ModelParams *model_params, Observation obs, int i, int sig_pm, double *ans)
-{
-    StateData *state;
-    int minor, total;
-    double pi;
-    double log_prob, diff;
-    double sigma_pi, rho_contam;
-    double exp_pi, exp_picontam;
-
-    state = &((model_params->states)[i]);
-    minor = state->minor;
-    total = state->total;
-
-    sigma_pi = model_params->sigma_pi;
-    rho_contam = model_params->rho_contam;
-
-    pi = (&obs)->pi;
-
-    exp_picontam = (sig_pm == -1) ? (rho_contam * 1.0 + (1.0 - rho_contam)*minor)/(rho_contam * 2.0 + (1.0 - rho_contam)*total) : (rho_contam * 1.0 + (1.0 - rho_contam)*(total-minor))/(rho_contam * 2.0 + (1.0 - rho_contam)*total);
-
-    diff = pi - exp_picontam;
-    log_prob = -1.0*(diff*diff)/(8.0*exp_picontam*(1.0-exp_picontam)*sigma_pi*sigma_pi);
-
-    /* fprintf(stderr, "State %d (minor %d, total %d), sigpm %d, ratio %lf, diff %lf, sigma_pi %lf, logprob %lf\n", i, minor, total, sig_pm, pi, diff, sigma_pi, log_prob); */
-    *ans = log_prob;
+    logpbin = logcombprod + (successes - high) * log(probsuccess) + 
+                     (trials - successes - high)*log(1.0-probsuccess);
+    if (logpbin < parameters->minexparg) {
+        *pbin = 0.0;
+    }
+    else {
+        *pbin = exp(logpbin);
+    }
+    /* fprintf(stderr, "Probability of %ld out of %ld with psuccess %lf: %lf\n", successes, trials, probsuccess, *pbin); */
 }
 
 /* derivatives of Baum auxiliary function */
 
-void dbaum_dmuratio(ModelParams *model_params, Observation *observations, double **gamma, double *derivative) {
+void dbaum_dmu(ModelParams *model_params, Observation *observations, double **gamma, double *derivative) {
 
-    int i, j, t, total;
-    double sig, sum, addend, rho_contam, eff_cn;
+    int i, total;
+    long t;
+    double sig, sum, addend, rho_contam, cneff;
     StateData *state;
 
-    sig = model_params->sigma_ratio;
+    sig = model_params->sigma;
     rho_contam = model_params->rho_contam;
     sum = 0.0;
     for (i = 0; i < model_params->N; i++) {
         state = model_params->states + i;
         total = state->total;
-        eff_cn = rho_contam + (1.0 - rho_contam) * total/2.0;
+        cneff = 2.0 * rho_contam + (1.0 - rho_contam) * total;
 
         for (t = 0; t < model_params->T; t++) {
-            addend = (gamma[t][i] + gamma[t][i + model_params->N]) *
-                    ((&(observations[t]))->depthratio -
-                    eff_cn * model_params->mu_ratio)/(sig*sig);
-            /* if (addend > 0.01) {
-                fprintf(stderr, "Large term t=%d, i=%d, %lf\n", t, i, addend);
-            } */
+            addend = gamma[t][i] * ((&(observations[t]))->tumortotaldepth -
+                    cneff * model_params->mu * (&(observations[t]))->normaltotaldepth/2.0)/(sig*sig);
             sum += addend;
         }
     }
     *derivative = sum;
 }
 
-void dbaum_dsigratio(ModelParams *model_params, Observation *observations, double **gamma, double *derivative) {
+void dbaum_dsigma(ModelParams *model_params, Observation *observations, double **gamma, double *derivative) {
 
-    int i, j, t, total;
-    double sig, sum, addend, thresh, rho_contam, eff_cn;
+    int i, total;
+    long t;
+    double sig, sum, addend, thresh, rho_contam, cneff;
     StateData *state;
 
     thresh = 10.0;
-    sig = model_params->sigma_ratio;
+    sig = model_params->sigma;
     rho_contam = model_params->rho_contam;
     sum = 0.0;
     for (i = 0; i < model_params->N; i++) {
         state = model_params->states + i;
         total = state->total;
-        eff_cn = rho_contam + (1.0 - rho_contam) * total/2.0;
+        cneff = 2.0 * rho_contam + (1.0 - rho_contam) * total;
         for (t = 0; t < model_params->T; t++) {
-            addend = (gamma[t][i] + gamma[t][i + model_params->N]) * (-1.0/sig);
+            addend = gamma[t][i] * (-1.0/sig);
             sum += addend;
-            addend = (gamma[t][i] + gamma[t][i + model_params->N]) *
-                      pow((&(observations[t]))->depthratio - 
-                         eff_cn * model_params->mu_ratio, 2) / (pow(sig, 3) * eff_cn);
-            /* if (addend > 0.01) {
-                fprintf(stderr, "Large term t=%d, i=%d, %lf\n", t, i, addend);
-            } */
-            sum += addend;
-            /* if (sum > thresh || sum < -1.0*thresh) {
-                fprintf(stderr, "Sum larger than %lf at t=%d, i=%d, %lf\n", thresh, t, i, sum);
-                thresh *= 10.0;
-            } */
-        }
-    }
-    *derivative = sum;
-}
-
-void dbaum_dsigpi(ModelParams *model_params, Observation *observations, double **gamma, double *derivative) {
-
-    int i, j, t, minor, total;
-    double sig, sum, addend, rho_contam, exp_pi, exp_picontam;
-    StateData *state;
-
-    sig = model_params->sigma_pi;
-    rho_contam = model_params->rho_contam;
-    sum = 0.0;
-    for (i = 0; i < model_params->N; i++) {
-        state = model_params->states + i;
-        minor = state->minor;
-        total = state->total;
-
-        /* exp_pi = (total == 0) ? 0.5 : 1.0*minor/total;
-        exp_picontam = rho_contam * (0.5 - exp_pi) + exp_pi; */
-        exp_picontam = (rho_contam * 1.0 + (1.0 - rho_contam)*minor)/(rho_contam * 2.0 + (1.0 - rho_contam)*total);
-
-        for (t = 0; t < model_params->T; t++) {
-            addend = (gamma[t][i] + gamma[t][i + model_params->N]) * (-1.0/sig);
-            sum += addend;
-            addend = gamma[t][i] *
-                      pow((&(observations[t]))->pi - exp_picontam, 2) 
-                      * 0.25 / (pow(sig, 3) * exp_picontam * (1.0 - exp_picontam));
-            sum += addend;
-            addend = gamma[t][i + model_params->N] *
-                      pow((&(observations[t]))->pi - (1.0 - exp_picontam), 2) 
-                      * 0.25 / (pow(sig, 3) * exp_picontam * (1.0 - exp_picontam));
+            addend = gamma[t][i] * 2.0 * pow((&(observations[t]))->tumortotaldepth - 
+                         cneff * model_params->mu * (&(observations[t]))->normaltotaldepth/2.0, 2) / 
+                            (pow(sig, 3) * cneff * (&(observations[t]))->normaltotaldepth);
             sum += addend;
         }
     }
@@ -179,18 +119,17 @@ void dbaum_dsigpi(ModelParams *model_params, Observation *observations, double *
 
 void dbaum_dtransprob(ModelParams *model_params, Observation *observations, double ***xi, double *derivative) {
 
-    int i, j, t, istate, jstate;
+    int i, j;
+    long t;
     double sum;
 
     sum = 0.0;
     for (t = 0; t < model_params->T - 1; t++) {
-        for (i = 0; i < 2*model_params->N; i++) {
-            for (j = 0; j < 2*model_params->N; j++) {
-                istate = (i >= model_params->N) ? i - model_params->N : i;
-                jstate = (j >= model_params->N) ? j - model_params->N : j;
-                if (istate == jstate) {
+        for (i = 0; i < model_params->N; i++) {
+            for (j = 0; j < model_params->N; j++) {
+                if (i == j) {
                     sum += xi[t][i][j] * (1.0 - model_params->N) /
-                          (0.5 - (model_params->N - 1.0) * model_params->trans_prob);
+                          (1.0 - (model_params->N - 1.0) * model_params->trans_prob);
                 }
                 else {
                     sum += xi[t][i][j] / model_params->trans_prob;
@@ -201,10 +140,12 @@ void dbaum_dtransprob(ModelParams *model_params, Observation *observations, doub
     *derivative = sum;
 }
 
+/* WARNING: THIS ROUTINE IS NOT CORRECT SINCE CHANGEOVER FROM GAUSSIAN TO BINOMIAL ALT PROBABILITIES */
 void exp_log_prob(ModelParams *model_params, Observation *observations, double **gamma, double *elogp) {
 
-    int i, j, t, minor, total;
-    double sig, sum, addend, logrp, logpip, logpin, loggauss, rho_contam, exp_pi, exp_picontam;
+    int i, j, minor, total;
+    long t;
+    double sig, sum, addend, loggauss, rho_contam;
     StateData *state;
 
     sum = 0.0;
@@ -213,24 +154,11 @@ void exp_log_prob(ModelParams *model_params, Observation *observations, double *
         state = model_params->states + i;
         minor = state->minor;
         total = state->total;
-        /* exp_pi = (total == 0) ? 0.5 : 1.0*minor/total;
-        exp_picontam = rho_contam * (0.5 - exp_pi) + exp_pi; */
-        exp_picontam = (rho_contam * 1.0 + (1.0 - rho_contam)*minor)/(rho_contam * 2.0 + (1.0 - rho_contam)*total);
 
-        loggauss = log(4.0*3.14159*model_params->sigma_pi *
-                                      model_params->sigma_ratio);
-        loggauss += 0.5 * log(2.0*rho_contam + (1.0 - rho_contam) * total);
-        loggauss += 0.5 * log(exp_picontam * (1.0 - exp_picontam));
+        loggauss = 0.5 * log(2.0*3.14159*model_params->sigma*model_params->sigma);
 
         for (t = 0; t < model_params->T; t++) {
-            ratio_log_prob(model_params, observations[t], i, &logrp);
-            altfreq_log_prob(model_params, observations[t], i, -1, &logpin);
-            altfreq_log_prob(model_params, observations[t], i, 1, &logpip);
-            addend = gamma[t][i] * (logrp + logpin);
-            sum += addend;
-            addend = gamma[t][i + model_params->N] * (logrp + logpip);
-            sum += addend;
-            addend = (gamma[t][i] + gamma[t][i + model_params->N]) * loggauss;
+            addend = gamma[t][i] * loggauss;
             sum -= addend;
         }
     }

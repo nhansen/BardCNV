@@ -33,6 +33,7 @@ void small_double_check(double *minexparg)
     int checkno;
     double expval, logval;
 
+    *minexparg = 1.0*(-1000 + 8); /* default low */
     for (checkno = 0; checkno > -1000; checkno--) {
         expval = exp(1.0*checkno);
         logval = log(expval);

@@ -30,22 +30,24 @@ extern Params *parameters;
 
 void write_states(int *states, double *probs, double log_prob, ModelParams *model_params, Observation *observations)
 {
-    int t, istate, qvalue;
+    int istate, qvalue;
+    long t;
     double probability;
     StateData *thisState;
     Observation *obs;
 
-    fprintf(stdout, "chr\tpos\tdepthratio\tpialt\tminor\ttotal\tscore\n");
+    fprintf(stdout, "chr\tpos\tnormaltotaldepth\ttumortotaldepth\ttumoraltdepth\tminor\ttotal\tscore\n");
     for (t = 0; t < model_params->T; t++) {
-        istate = (*(states+t) >= model_params->N) ? *(states+t) - model_params->N : *(states+t);
+        istate = *(states+t);
         probability = *(probs + t);
+        /* fprintf(stdout, "prob %lf\n", probability); */
         qvalue = (probability == 1.0) ? 90 : -10 * ceil(log(1.0 - probability));
         if (qvalue > 90) {
             qvalue = 90;
         }
         thisState = model_params->states+istate;
         obs = &(observations[t]);
-        fprintf(stdout, "%s\t%d\t%lf\t%lf\t%d\t%d\t%d\n", obs->chr, obs->pos, obs->depthratio, obs->pi, thisState->minor, thisState->total, qvalue);
+        fprintf(stdout, "%s\t%ld\t%ld\t%ld\t%ld\t%d\t%d\t%d\n", obs->chr, obs->pos, obs->normaltotaldepth, obs->tumortotaldepth, obs->tumoraltdepth, thisState->minor, thisState->total, qvalue);
 
     }
 }
@@ -76,8 +78,7 @@ void write_model(ModelParams *model_params)
         }
     } */
     fprintf(stdout, "Transprob= %g\n", model_params->trans_prob); 
-    fprintf(stdout, "mu_ratio= %lf\n", model_params->mu_ratio); 
-    fprintf(stdout, "sigma_ratio= %lf\n", model_params->sigma_ratio); 
+    fprintf(stdout, "mu= %lf\n", model_params->mu); 
+    fprintf(stdout, "sigma= %lf\n", model_params->sigma); 
     fprintf(stdout, "rho_contam= %lf\n", model_params->rho_contam); 
-    fprintf(stdout, "sigma_pi= %lf\n", model_params->sigma_pi); 
 }

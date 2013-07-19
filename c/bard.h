@@ -48,18 +48,16 @@ typedef struct modelparams {
     double trans_prob;
     double **a;
     double *pi;
-    double mu_ratio;
-    double sigma_ratio;
+    double mu;
+    double sigma;
     double rho_contam;
-    double sigma_pi;
 
 } ModelParams;
 
 typedef struct observation {
     char *chr;
     long pos;
-    double depthratio;
-    double pi;
+    long tumortotaldepth, normaltotaldepth, tumoraltdepth;
 
 } Observation;
 
@@ -68,15 +66,15 @@ void read_observations(char *filename, ModelParams **model_params, Observation *
 void filter_highcopy_observations(ModelParams **model_params, Observation **observations);
 void run_viterbi(ModelParams *model_params, Observation *observations, int *state_indices, double *probs, double *log_prob);
 void ratio_log_prob(ModelParams *model_params, Observation obs, int i, double *ans);
-void altfreq_log_prob(ModelParams *model_params, Observation obs, int i, int sig_pm, double *ans);
 void write_states(int *states, double *probs, double log_prob, ModelParams *model_params, Observation *observations);
 double run_baumwelch(ModelParams **model_params, Observation *observations);
 void run_baumwelch_contam_optimization(ModelParams **model_params, Observation *observations);
+void calc_bprobs(ModelParams *model_params, Observation *observations, double **bprob);
 void calc_eprobs(ModelParams *model_params, Observation *observations, double **eprob);
-void calc_alphas(ModelParams *model_params, Observation *observations, double **alpha, double **eprob, double *mll);
-void calc_betas(ModelParams *model_params, Observation *observations, double **beta, double **eprob);
-void calc_gammas(ModelParams *model_params, double **alpha, double **beta, double **gamma, double **eprob);
-void calc_xis(ModelParams *model_params, double **alpha, double **beta, double ***xi, double **eprob);
+void calc_alphas(ModelParams *model_params, Observation *observations, double **alpha, double **bprob, double **eprob, double *mll);
+void calc_betas(ModelParams *model_params, Observation *observations, double **beta, double **bprob, double **eprob);
+void calc_gammas(ModelParams *model_params, double **alpha, double **beta, double **gamma);
+void calc_xis(ModelParams *model_params, double **alpha, double **beta, double ***xi, double **bprob, double **eprob);
 void write_model(ModelParams *model_params);
 void dbaum_dmuratio(ModelParams *model_params, Observation *observations, double **gamma, double *derivative);
 void plot_mu_prob(ModelParams *model_params, Observation *observations);
@@ -96,3 +94,4 @@ void free_double_vector(double *vector);
 void free_int_matrix(int **matrix, int rows);
 int *alloc_int_vector(int entries);
 void free_int_vector(int *vector);
+double binprob(long successes, long trials, double probsuccess, double *pbin);

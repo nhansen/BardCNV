@@ -179,9 +179,8 @@ void copy_params(ModelParams *from_model_params, ModelParams **to_model_params) 
     (*to_model_params)->N = from_model_params->N;
     noStates = from_model_params->N;
     (*to_model_params)->trans_prob = from_model_params->trans_prob;
-    (*to_model_params)->mu_ratio = from_model_params->mu_ratio;
-    (*to_model_params)->sigma_ratio = from_model_params->sigma_ratio;
-    (*to_model_params)->sigma_pi = from_model_params->sigma_pi;
+    (*to_model_params)->mu = from_model_params->mu;
+    (*to_model_params)->sigma = from_model_params->sigma;
     (*to_model_params)->rho_contam = from_model_params->rho_contam;
 
     /* allocate space for state transitions, state parameters */

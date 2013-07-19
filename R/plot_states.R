@@ -12,7 +12,7 @@ plot_states <- function(df, plotchr, xlow=0, xhigh=0, muratio=0.0, sample=c(""),
     }
 
     par(mfrow=c(3,1));
-    plot(pos, depthratio, pch=20, col=rgb(150,150,150,50, maxColorValue=255), xlim=c(xlow, xhigh), main=paste(sample, "Depth of Coverage Ratio on", plotchr));
+    plot(pos, tumortotaldepth/normaltotaldepth, pch=20, col=rgb(150,150,150,50, maxColorValue=255), xlim=c(xlow, xhigh), main=paste(sample, "Depth of Coverage Ratio on", plotchr));
     if (!nolines) {
         if (muratio != 0) {
            expratio <- muratio*total*0.5*(1.0 - contam) + contam * muratio;
@@ -25,7 +25,7 @@ plot_states <- function(df, plotchr, xlow=0, xhigh=0, muratio=0.0, sample=c(""),
     ymax <- max(total) + 1
     explow <- 1.0*minor/total*(1.0 - contam) + contam*0.5
     exphigh <- 1.0 - explow
-    plot(pos, pialt, pch=20, col=rgb(150,150,150,50, maxColorValue=255), xlim=c(xlow, xhigh), main="Percentage Alternate Allele Among Reads");
+    plot(pos, tumoraltdepth/(tumortotaldepth + 0.01), pch=20, col=rgb(150,150,150,50, maxColorValue=255), xlim=c(xlow, xhigh), main="Percentage Alternate Allele Among Reads");
     if (!nolines) {
         points(pos, explow, col=c("darkgreen"), type="s")
         points(pos, exphigh, col=c("darkgreen"), type="s")

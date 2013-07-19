@@ -37,7 +37,7 @@ void show_usage()
         "    baumwelch - train model using observations\n"
         "    bwcontam  - train model, allowing for contamination\n"
         "    viterbi   - report most likely state at each observation\n"
-        "    plotmu    - plot the probability for various values of mu (depth-ratio)\n"
+        "    plotmu    - plot the probability for various values of mu (depth multiplier)\n"
         "For specific parameters for each command, run 'bardcnv COMMAND'\n");
     exit(1);
 }
@@ -47,8 +47,9 @@ main(int argc, char **argv)
     Observation *observations;
     ModelParams *model_params;
     Observation *thisObs;
+    long i, j;
     int *states;
-    double *probs, log_prob;
+    double *probs, log_prob, bin_prob, total_prob, success_prob;
 
     get_params(argc, argv);
     small_double_check(&(parameters->minexparg));
@@ -110,6 +111,20 @@ main(int argc, char **argv)
     }
     else if (strcmp(parameters->program, "precision") == 0) {
         fprintf(stdout, "Performing precision check!\n");
+    }
+    else if (strcmp(parameters->program, "testbin") == 0) {
+        fprintf(stdout, "Performing binomial probability test!\n");
+        success_prob = 0.2;
+
+        for (i=1; i<=10000; i++) {
+            total_prob = 0.0;
+            for (j=0; j<=i; j++) {
+                binprob(j, i, success_prob, &bin_prob);
+                fprintf(stdout, "%d\t%d\t%lf\n", j, i, bin_prob);
+                total_prob += bin_prob;
+            }
+            fprintf(stdout, "Total\t%d\t%lf\n", i, total_prob);
+        }
     }
     else {
         fprintf(stderr, "Invalid program name %s.\n", parameters->program);
