@@ -163,7 +163,21 @@ sub read_cnv_states {
     my $rdr_sum = 0;
     my $rdr_total = 0;
     while (<$fh>) {
-        if (/^(\S+)\s(\d+)\s(\S+)\s(\S+)\s(\d+)\s(\d+)\s(\d+)$/) {
+        if (/^(\S+)\s(\d+)\s(\S+)\s(\S+)\s(\S+)\s(\d+)\s(\d+)\s(\d+)$/) { # bard binomial
+            my ($chr, $pos, $normaldepth, $tumordepth, $tumoralt, $minor, $total, $score) = 
+                 ($1, $2, $3, $4, $5, $6, $7, $8);
+
+            my $somatic_score = ($minor==1 && $total==2) ? 0 : $score + 5*abs($total + $minor - 3.0);
+            $rh_state_call->{$chr}->{$pos} = {'minor' => $minor,
+                                              'total' => $total,
+                                              'score' => $score,
+                                              'somatic_score' => $somatic_score};
+            if ($score == 90 && $total != 0) {
+                $rdr_sum += $tumordepth/$normaldepth/$total;
+                $rdr_total++;
+            }
+        }
+        elsif (/^(\S+)\s(\d+)\s(\S+)\s(\S+)\s(\d+)\s(\d+)\s(\d+)$/) {
             my ($chr, $pos, $rdr, $alt_freq, $minor, $total, $score) =
                  ($1, $2, $3, $4, $5, $6, $7);
             my $somatic_score = ($minor==1 && $total==2) ? 0 : 
@@ -200,6 +214,18 @@ sub read_observations {
                                               'score' => 99, 'somatic_score' => 90};
             }
         }
+        elsif (/^(\S+)\s(\d+)\s(\S+)\s(\S+)\s(\S+)$/) {
+            my ($chr, $pos, $normaldepth, $tumordepth, $tumoralt) = ($1, $2, $3, $4, $5);
+            my $alt_freq = ($tumordepth) ? $tumoralt/$tumordepth : 0.5;
+            my $rdr = $tumordepth/$normaldepth;
+            if (!$rh_states->{$chr}->{$pos}) {
+                $alt_freq = 1 - $alt_freq if ($alt_freq > 0.5);
+                my $minor_est = int($alt_freq*$rdr/$mean_rdrc);
+                $rh_states->{$chr}->{$pos} = {'minor' => $minor_est,
+                                              'total' => int($rdr/$mean_rdrc),
+                                              'score' => 99, 'somatic_score' => 90};
+            }
+        }
     }
 }
 
@@ -226,7 +252,9 @@ sub write_vcf_lines {
             my $state_minor = defined ($rh_states->{$chr}->{$pos}->{'minor'}) ? $rh_states->{$chr}->{$pos}->{'minor'} : '.'; 
             my $score = $rh_states->{$chr}->{$pos}->{'score'}; 
             my $somatic_score = $rh_states->{$chr}->{$pos}->{'somatic_score'}; 
-            next if ($somatic_score < $Opt{'min_score'});
+            #print "$chr\t$pos\t$state_minor\t$state_total\t$score\n";
+            #next if ($somatic_score < $Opt{'min_score'});
+            next if ($score < $Opt{'min_score'});
             if (!defined($current_state_total) ) {
                 $hard_start = $pos;
                 $hard_end = $pos;
@@ -328,7 +356,10 @@ sub vcf_line {
     my $score_mean = shift;
     my $somatic_score_mean = shift;
 
-    return "$chr\t$hard_start\t.\t.\t<CNV>\t$somatic_score_mean\tPASS\tSOMATIC;END=$hard_end\tGT:GQ:DP:AD:BQ:SS:MCN:CN:CNQ:SSC\t.:.:.:.:.:2:$current_state_minor:$current_state_total:$score_mean:$somatic_score_mean\t.:.:.:.:.:.:1:2:40:.\n";
+    #print "VCFline: $chr\t$hard_start\t$hard_end\t$current_state_minor\t$current_state_total\n";
+
+    my $somatic = ($current_state_total != 2 || $current_state_minor != 1) ? 'SOMATIC;' : '';
+    return "$chr\t$hard_start\t.\t.\t<CNV>\t$somatic_score_mean\tPASS\t$somatic"."END=$hard_end\tGT:GQ:DP:AD:BQ:SS:MCN:CN:CNQ:SSC\t.:.:.:.:.:2:$current_state_minor:$current_state_total:$score_mean:$somatic_score_mean\t.:.:.:.:.:.:1:2:40:.\n";
 
 }
 
@@ -362,10 +393,12 @@ sub low_qual_filler {
     my $right_end = $right_start + $right_length - 1;
     $right_start = $right_end - $Opt{'max_pad'} if ($right_start < $right_end - $Opt{'max_pad'});
     if ($left_end - $left_start > 1) {
-        push @lq_vcf_lines, "$chr\t$left_start\t.\t.\t<CNV>\t10\tPASS\tSOMATIC;END=$left_end\tGT:GQ:DP:AD:BQ:SS:MCN:CN:CNQ:SSC\t.:.:.:.:.:2:$last_minor:$last_cn:10:10\t.:.:.:.:.:.:1:2:40:.\n";
+        my $somatic = ($last_minor != 1 || $last_cn != 2) ? 'SOMATIC;' : '';
+        push @lq_vcf_lines, "$chr\t$left_start\t.\t.\t<CNV>\t10\tPASS\t$somatic"."END=$left_end\tGT:GQ:DP:AD:BQ:SS:MCN:CN:CNQ:SSC\t.:.:.:.:.:2:$last_minor:$last_cn:10:10\t.:.:.:.:.:.:1:2:40:.\n";
     }
     if ($right_end - $right_start > 1) {
-        push @lq_vcf_lines, "$chr\t$right_start\t.\t.\t<CNV>\t10\tPASS\tSOMATIC;END=$right_end\tGT:GQ:DP:AD:BQ:SS:MCN:CN:CNQ:SSC\t.:.:.:.:.:2:$next_minor:$next_cn:10:10\t.:.:.:.:.:.:1:2:40:.\n";
+        my $somatic = ($next_minor != 1 || $next_cn != 2) ? 'SOMATIC;' : '';
+        push @lq_vcf_lines, "$chr\t$right_start\t.\t.\t<CNV>\t10\tPASS\t$somatic"."END=$right_end\tGT:GQ:DP:AD:BQ:SS:MCN:CN:CNQ:SSC\t.:.:.:.:.:2:$next_minor:$next_cn:10:10\t.:.:.:.:.:.:1:2:40:.\n";
     }
 
     return @lq_vcf_lines;
