@@ -23,7 +23,7 @@ plot_states <- function(df, plotchr, xlow=0, xhigh=0, muratio=0.0, sample=c(""),
         add_segs(segs, muratio=muratio, contam=contam, segcol=c("darkblue"), chr=plotchr)
     }
     ymax <- max(total) + 1
-    explow <- 1.0*minor/total*(1.0 - contam) + contam*0.5
+    explow <- (1.0*minor*(1.0-contam) + 1.0*contam)/(total*(1.0 - contam) + 2.0*contam)
     exphigh <- 1.0 - explow
     plot(pos, tumoraltdepth/(tumortotaldepth + 0.01), pch=20, col=rgb(150,150,150,50, maxColorValue=255), xlim=c(xlow, xhigh), main="Percentage Alternate Allele Among Reads");
     if (!nolines) {

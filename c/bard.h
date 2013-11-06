@@ -27,11 +27,12 @@ typedef struct params {
     char *program;
     char *modelfile;
     char *obsfile;
-    double min, max, maxratio;
+    double min, max, maxratio, success;
     double minexparg;
     long nobins;
     int fixtrans;
     int derivatives;
+    int verbose;
 
 } Params;
 

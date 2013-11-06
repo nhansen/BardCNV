@@ -49,7 +49,7 @@ main(int argc, char **argv)
     Observation *thisObs;
     long i, j;
     int *states;
-    double *probs, log_prob, bin_prob, total_prob, success_prob;
+    double *probs, log_prob, bin_prob, total_prob;
 
     get_params(argc, argv);
     small_double_check(&(parameters->minexparg));
@@ -113,13 +113,11 @@ main(int argc, char **argv)
         fprintf(stdout, "Performing precision check!\n");
     }
     else if (strcmp(parameters->program, "testbin") == 0) {
-        fprintf(stdout, "Performing binomial probability test!\n");
-        success_prob = 0.2;
 
         for (i=1; i<=10000; i++) {
             total_prob = 0.0;
             for (j=0; j<=i; j++) {
-                binprob(j, i, success_prob, &bin_prob);
+                binprob(j, i, parameters->success, &bin_prob);
                 fprintf(stdout, "%d\t%d\t%lf\n", j, i, bin_prob);
                 total_prob += bin_prob;
             }

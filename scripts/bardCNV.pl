@@ -56,17 +56,17 @@ if ($Opt{'plots'}) {
 sub process_commandline {
     # Set defaults here
     %Opt = ( mindepth => 0 , maxcopies => 8, transprob => 0.0001, countopts => '',
-             sigratio => 1.00, contam => 0.01, sigpi => 0.15, maxviterbicopies => 24,
+             sigratio => 3.00, contam => 0.01, sigpi => 0.15, maxviterbicopies => 24,
              mincontam => 0.01, maxcontam => 0.5 );
     GetOptions(
         \%Opt, qw(
             manual help+ version normalbam=s tumorbam=s ref=s
             outdir=s hetfile=s mindepth=i maxcopies=i 
             transprob=f countopts=s trio fixedtrans
-            mombam=s dadbam=s childbam=s male
+            mombam=s dadbam=s childbam=s male diploid
             sigratio=f contam=f optcontam mincontam=i
             maxcontam=i sigpi=f skipcounts skipobs 
-            skiptrain skipstates skipvcf
+            skiptrain skipstates skipvcf verbose
             omittrainentries=s plots sge vcf!
 		  )
 	) || pod2usage(0);
@@ -98,7 +98,7 @@ sub create_working_directory {
     my $workdir;
     if ($Opt{outdir}) {
         if (!(-e $Opt{outdir})) {
-            print STDERR "Attempting to create $Opt{'outdir'}\n";
+            print STDERR "Attempting to create $Opt{'outdir'}\n" if ($Opt{'verbose'});
             mkdir $Opt{'outdir'};
         }
         $workdir = $Opt{'outdir'};
@@ -256,6 +256,8 @@ sub train_model {
         or die "Couldn\'t open $obs_file: $!\n";
     my $total_ratio = 0.0;
     my $datapoints = 0;
+    my $total_normal_depth = 0;
+    my $total_tumor_depth = 0;
     while (<OBS>) {
         if (/^(\S+)\s(\d+)\s(\d+)\s(\d+)/) { # read depth ratio is fourth divided by third column
             my ($normal_depth, $tumor_depth) = ($3, $4);
@@ -266,6 +268,8 @@ sub train_model {
             my $ratio = $tumor_depth/$normal_depth; 
             $total_ratio += $ratio;
             $datapoints++;
+            $total_normal_depth += $normal_depth;
+            $total_tumor_depth += $tumor_depth;
         }
     }
     close OBS;
@@ -295,7 +299,8 @@ sub train_model {
                 write_train_start_file("$workdir/train_$muratio_string\_$contamval/train_start.txt", $muratio, $contamval); 
                 my $maxratio_opt = $ratio_avg * 4.0;
                 my $fix_opt = ($Opt{'fixedtrans'}) ? '-fixtrans' : '';
-                my $train_cmd = "bardcnv baumwelch -derivatives -obsfile $obs_file -modelfile $workdir/train_$muratio_string\_$contamval/train_start.txt $fix_opt -maxratio $maxratio_opt > $workdir/train_$muratio_string\_$contamval/train.out 2>$workdir/train_$muratio_string\_$contamval/train.err";
+                my $verbose_opt = ($Opt{'verbose'}) ? '-verbose' : '';
+                my $train_cmd = "bardcnv baumwelch -derivatives -obsfile $obs_file -modelfile $workdir/train_$muratio_string\_$contamval/train_start.txt $fix_opt $verbose_opt -maxratio $maxratio_opt > $workdir/train_$muratio_string\_$contamval/train.out 2>$workdir/train_$muratio_string\_$contamval/train.err";
                 push @train_commands, $train_cmd;
             }
             push @output_files, "$workdir/train_$muratio_string\_$contamval/train.out";
@@ -307,6 +312,8 @@ sub train_model {
 
     my $best_model_file;
     my $bestlogp;
+    my $diploid_model_file;
+    my $most_diploid_ploidy;
     foreach my $outputfile (@output_files) {
         my $error_file = $outputfile;
         $error_file =~ s/\.out/.err/;
@@ -317,9 +324,23 @@ sub train_model {
         }
         my $logp = `grep 'MLL difference' $error_file | tail -1 | awk '{print \$5}' | sed 's/)//'`;
         chomp $logp;
+        my $mu = `grep 'mu=' $outputfile | awk '{print \$2}'`;
+        chomp $mu;
+        my $contam = `grep 'contam=' $outputfile | awk '{print \$2}'`;
+        chomp $contam;
+        print STDERR "$error_file\t$mu\t$contam\t$logp\n";
+
         if (($logp =~ /[-\d\.]+/) && (!(defined($bestlogp)) || ($logp > $bestlogp))) {
             $best_model_file = $outputfile;
             $bestlogp = $logp;
+        }
+
+        if (($Opt{'diploid'}) && $mu =~ /^[.\d]+$/ && $contam =~ /^[.\d]+$/) {
+            my $ploidy = (2.0*$total_tumor_depth/$total_normal_depth/$mu - $contam*2.0)/(1.0 - $contam);
+            if (!(defined($most_diploid_ploidy)) || abs($ploidy - 2.0) < abs($most_diploid_ploidy - 2.0)) {
+                $most_diploid_ploidy = $ploidy;
+                $diploid_model_file = $outputfile;
+            }
         }
     }
     if ($best_model_file) {
@@ -329,7 +350,14 @@ sub train_model {
         die "Unable to train model--no best mu_ratio value.\n";
     }
 
-    return "$workdir/best_model_file.txt";
+    if ($diploid_model_file) {
+        copy($diploid_model_file, "$workdir/diploid_model_file.txt");
+    }
+    else {
+        die "Unable to create a diploid model file--no training produced a close-to-diploid model.\n";
+    }
+
+    return ($Opt{'diploid'}) ? "$workdir/diploid_model_file.txt" : "$workdir/best_model_file.txt";
 }
 
 sub write_train_start_file {
@@ -396,7 +424,7 @@ sub run_viterbi {
     open NEWTRAIN, ">$viterbi_param_file"
         or die "Couldn\'t open $viterbi_param_file for writing: $!\n";
 
-    print "Opening file $viterbi_param_file for writing high copy number model params.\n";
+    print STDERR "Opening file $viterbi_param_file for writing high copy number model params.\n";
 
     my @state_lines = ();
     while (<TRAIN>) {
@@ -407,7 +435,6 @@ sub run_viterbi {
                 push @state_lines, $next_line;
             }
             my $last_line = $state_lines[$#state_lines];
-            #print "$orig_states states\n$last_line";
             if ($state_lines[$#state_lines] =~ /^(\d+)\s(\d+)/) {
                 my $train_max_states =  $2;
                 for (my $copies = $train_max_states + 1; $copies <= $Opt{'maxviterbicopies'}; $copies++) {
@@ -688,7 +715,7 @@ Do not optimize the state transition probabilities using Baum-Welch.  Often, all
 
 =item B<--sigratio>
 
-Specify the starting value for the standard deviation of the (Gaussian distributed) ratio of depth of coverage in the tumor sequence to depth of coverage in the normal sequence (default 1.00).
+Specify the starting value for the standard deviation of the (Gaussian distributed) ratio of depth of coverage in the tumor sequence to depth of coverage in the normal sequence (default 3.00).
 
 =item B<--sigpi>
 

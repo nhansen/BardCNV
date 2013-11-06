@@ -42,6 +42,8 @@ void get_params(argc, argv)
     parameters->fixtrans = 0; /* option to skip optimization of transition probs */
     parameters->derivatives = 0; /* option to calculate derivatives with respect to parameters */
     parameters->maxratio = 0; /* option to limit observations to those having a given maximum ratio of tumortotaldepth to normaltotaldepth */
+    parameters->verbose = 0; /* option to print more output for diagnosis */
+    parameters->success = 0.0; /* option to pass a success probability to "testbin" */
 
     if (argc > 1 && argv[1][0] != '-') {
         parameters->program = (char *) malloc((strlen(argv[1]) + 1) * sizeof(char));
@@ -83,6 +85,12 @@ void get_params(argc, argv)
         }
         if (!strcmp(argv[i], "-derivatives")) {
             parameters->derivatives = 1;
+        }
+        if (!strcmp(argv[i], "-verbose")) {
+            parameters->verbose = 1;
+        }
+        if (!strcmp(argv[i], "-success")) {
+            parameters->success = atof(argv[++i]);
         }
     }
 }

@@ -275,11 +275,13 @@ void calc_bprobs(ModelParams *model_params, Observation *observations, double **
             /* fprintf(stderr, "Calculated probs %lf %lf for depth %d out of %d with prob %lf\n", bbinaryprob, abinaryprob, altdepth, tumordepth, propeff[i]); */
             bprob[t][i] = 0.5*(abinaryprob + bbinaryprob);
             if (isnan(bprob[t][i])) {
-                fprintf(stderr, "brob is not a number at t=%ld, state %d!\n", t, i);
+                fprintf(stderr, "bprob is not a number at t=%ld, state %d!\n", t, i);
                 exit(1);
             }
             if (bprob[t][i] <= 0.00001) {
-                fprintf(stderr, "Setting bprob to 0.00001 at %ld for state %d, tumoralt %ld, tumortotal %ld (prop=%lf)\n", t, i, altdepth, tumordepth, propeff[i]);
+                if ( parameters->verbose != 0 ) {
+                    fprintf(stderr, "Setting bprob to 0.00001 at %ld for state %d, tumoralt %ld, tumortotal %ld (prop=%lf)\n", t, i, altdepth, tumordepth, propeff[i]);
+                }
                 bprob[t][i] = 0.00001;
 
             }
@@ -343,7 +345,9 @@ void calc_eprobs(ModelParams *model_params, Observation *observations, double **
             logprob = pow((1.0*tumordepth - mu*cneff[i]*normaldepth/2.0), 2);
             logprob = -1.0*logprob/(normaldepth*cneff[i]*pow(sigma, 2));
             if (logprob < parameters->minexparg) {
-                fprintf(stderr, "Setting eprob to 0.0 at %ld for state %d, normal %ld, tumor %ld (mu=%lf, sigma=%lf, cneff=%lf)\n", t, i, normaldepth, tumordepth, mu, sigma, cneff[i]);
+                if ( parameters->verbose != 0 ) {
+                    fprintf(stderr, "Setting eprob to 0.0 at %ld for state %d, normal %ld, tumor %ld (mu=%lf, sigma=%lf, cneff=%lf)\n", t, i, normaldepth, tumordepth, mu, sigma, cneff[i]);
+                }
                 eprob[t][i] = 0.0;
             }
             else {
