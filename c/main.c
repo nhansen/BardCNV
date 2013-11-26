@@ -38,6 +38,7 @@ void show_usage()
         "    bwcontam  - train model, allowing for contamination\n"
         "    viterbi   - report most likely state at each observation\n"
         "    plotmu    - plot the probability for various values of mu (depth multiplier)\n"
+	"    bamcounts - print out base counts for each ATGC base on each strand from BAM file\n"
         "For specific parameters for each command, run 'bardcnv COMMAND'\n");
     exit(1);
 }
@@ -73,6 +74,7 @@ main(int argc, char **argv)
         free_int_vector(states);
         free_double_vector(probs);
         fprintf(stderr, "Finished writing states.\n");
+        exit(0);
     }
     else if (strcmp(parameters->program, "baumwelch") == 0 ) {
         if (!parameters->modelfile || !parameters->obsfile) {
@@ -86,6 +88,7 @@ main(int argc, char **argv)
         run_baumwelch(&model_params, observations); 
         write_model(model_params);
         fprintf(stderr, "Finished writing model.\n");
+        exit(0);
     }
     else if (strcmp(parameters->program, "plotmu") == 0 ) {
         if (!parameters->modelfile || !parameters->obsfile) {
@@ -96,6 +99,7 @@ main(int argc, char **argv)
         read_model(parameters->modelfile, &model_params);
         read_observations(parameters->obsfile, &model_params, &observations);
         plot_mu_prob(model_params, observations); 
+        exit(0);
     }
     else if (strcmp(parameters->program, "bwcontam") == 0) {
         if (!parameters->modelfile || !parameters->obsfile) {
@@ -108,9 +112,7 @@ main(int argc, char **argv)
         filter_highcopy_observations(&model_params, &observations);
         run_baumwelch_contam_optimization(&model_params, observations);
         write_model(model_params);
-    }
-    else if (strcmp(parameters->program, "precision") == 0) {
-        fprintf(stdout, "Performing precision check!\n");
+        exit(0);
     }
     else if (strcmp(parameters->program, "testbin") == 0) {
 
@@ -123,9 +125,19 @@ main(int argc, char **argv)
             }
             fprintf(stdout, "Total\t%d\t%lf\n", i, total_prob);
         }
+        exit(0);
+    }
+    else if (strcmp(parameters->program, "bamcounts") == 0) {
+        if (!parameters->fasta || !parameters->bam) {
+            fprintf(stderr, "Usage: bardcnv bamcounts -fasta <reference fasta file> -bam <bam file of aligned sequence reads>\n");
+            exit(1);
+        }
+        write_bamcounts();
+        exit(0);
     }
     else {
         fprintf(stderr, "Invalid program name %s.\n", parameters->program);
         show_usage();
     }
 }
+

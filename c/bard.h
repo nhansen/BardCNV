@@ -33,6 +33,12 @@ typedef struct params {
     int fixtrans;
     int derivatives;
     int verbose;
+    char *fasta;
+    char *bam;
+    char *region;
+    char *bedfile;
+    int minqual;
+    int mapqual;
 
 } Params;
 

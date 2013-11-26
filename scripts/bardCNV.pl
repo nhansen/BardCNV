@@ -32,8 +32,6 @@ Using B-allele frequencies within sequence from a tumor sample, and the depth of
 # Begin MAIN
 #------------
 
-$ENV{'PATH'} = "/home/nhansen/projects/bard_binomial/bard/scripts:/home/nhansen/projects/bard_binomial/bard/c:/home/nhansen/projects/bamcounts:$ENV{PATH}";
-
 my $plotstates_rlib = "/home/nhansen/projects/bard_binomial/bard/R/plot_states.R";
 
 process_commandline();
@@ -56,16 +54,18 @@ if ($Opt{'plots'}) {
 sub process_commandline {
     # Set defaults here
     %Opt = ( mindepth => 0 , maxcopies => 8, transprob => 0.0001, countopts => '',
-             sigratio => 3.00, contam => 0.01, sigpi => 0.15, maxviterbicopies => 24,
+             minnormaldepth => 0, mintumordepth => 0,
+             sigratio => 3.00, contam => 0.01, maxviterbicopies => 24,
              mincontam => 0.01, maxcontam => 0.5 );
     GetOptions(
         \%Opt, qw(
             manual help+ version normalbam=s tumorbam=s ref=s
             outdir=s hetfile=s mindepth=i maxcopies=i 
+            minnormaldepth=i mintumordepth=i
             transprob=f countopts=s trio fixedtrans
             mombam=s dadbam=s childbam=s male diploid
             sigratio=f contam=f optcontam mincontam=i
-            maxcontam=i sigpi=f skipcounts skipobs 
+            maxcontam=i skipcounts skipobs 
             skiptrain skipstates skipvcf verbose
             omittrainentries=s plots sge vcf!
 		  )
@@ -138,7 +138,7 @@ sub create_observable_files {
         my @count_commands = ();
         my @bam_files = ($Opt{'trio'}) ? ('mombam', 'dadbam', 'childbam') : ('normalbam', 'tumorbam');
         foreach my $fileopt (@bam_files) {
-            my $cmd = "bamcounts -fasta $Opt{ref} -bam $Opt{$fileopt} -bedfile $Opt{hetfile} $Opt{countopts} > $workdir/$fileopt.counts";
+            my $cmd = "bardcnv bamcounts -fasta $Opt{ref} -bam $Opt{$fileopt} -bedfile $Opt{hetfile} $Opt{countopts} > $workdir/$fileopt.counts";
             push @count_commands, $cmd;
         }
         run_commands(\@count_commands, '-o' => "$workdir",
@@ -182,7 +182,7 @@ sub create_observable_files {
         
                 my @sorted_bases = sort {$base_counts{$b} <=> $base_counts{$a}} keys %base_counts;
                 my $alt_count = $base_counts{$sorted_bases[0]};
-                if ($sorted_bases[0] ne $ref) {
+                if ($sorted_bases[0] ne $ref) { # this should always be so for non-trios, since ref base was deleted from base_counts hash
                     $rh_alt_allele->{$chr}->{$pos} = $sorted_bases[0];
                 }
             }
@@ -205,7 +205,6 @@ sub create_observable_files {
             $base_counts{'G'} = $G_count + $g_count;
             $rh_tumor_count->{$chr}->{$pos} = $base_counts{'A'} + $base_counts{'T'} + $base_counts{'G'} + $base_counts{'C'};
     
-            my $ref_count = $base_counts{$ref};
             my $alt_count;
             if ($rh_alt_allele->{$chr} && $rh_alt_allele->{$chr}->{$pos}) {
                 my $alt_allele = $rh_alt_allele->{$chr}->{$pos};
@@ -233,6 +232,8 @@ sub create_observable_files {
             my $normal_reads = $rh_norm_count->{$chr}->{$pos};
             my $tumor_reads = ($rh_tumor_count->{$chr} && $rh_tumor_count->{$chr}->{$pos}) ? $rh_tumor_count->{$chr}->{$pos} : 0;
             next if ($normal_reads + $tumor_reads < $Opt{'mindepth'});
+            next if ($normal_reads < $Opt{'minnormaldepth'});
+            next if ($tumor_reads < $Opt{'mintumordepth'});
             next if (!$normal_reads);
             my $alt_count = ($rh_alt_count->{$chr} && defined($rh_alt_count->{$chr}->{$pos})) ? $rh_alt_count->{$chr}->{$pos} : 0;
             if ((!@omit_entries || !grep {$_ eq $chr} @omit_entries) && ($chr !~ /X/ || !$Opt{'male'} )) {
@@ -275,7 +276,7 @@ sub train_model {
     close OBS;
     my $ratio_avg = $total_ratio/$datapoints;
     print STDERR "Mean read depth ratio: $ratio_avg\n";
-    my @muratio_vals = ($ratio_avg/4.0, $ratio_avg/3.0, $ratio_avg/2.0, 2.0*$ratio_avg/3.0, $ratio_avg, 2.0*$ratio_avg);
+    my @muratio_vals = ($Opt{'optcontam'}) ? ($ratio_avg) : ($ratio_avg/4.0, $ratio_avg/3.0, $ratio_avg/2.0, 2.0*$ratio_avg/3.0, $ratio_avg, 2.0*$ratio_avg);
     my @contam_vals = ();
     if ($Opt{'optcontam'}) {
         for (my $thiscontam = $Opt{'mincontam'}; $thiscontam <= $Opt{'maxcontam'}; $thiscontam+= 0.01) {
@@ -350,10 +351,10 @@ sub train_model {
         die "Unable to train model--no best mu_ratio value.\n";
     }
 
-    if ($diploid_model_file) {
+    if (($Opt{'diploid'}) && $diploid_model_file) {
         copy($diploid_model_file, "$workdir/diploid_model_file.txt");
     }
-    else {
+    elsif ($Opt{'diploid'}) {
         die "Unable to create a diploid model file--no training produced a close-to-diploid model.\n";
     }
 
@@ -497,11 +498,14 @@ sub calc_stats_file {
             my $score = $8;
             $all_chroms{$chr} = 1;
             $rh_qual_stats->{$chr}->{'total'} = 0 if (! (defined ($rh_qual_stats->{$chr}->{'total'})));
-            $rh_qual_stats->{$chr}->{'60'} = 0 if (! (defined ($rh_qual_stats->{$chr}->{'60'})));
+            $rh_qual_stats->{$chr}->{'40'} = 0 if (! (defined ($rh_qual_stats->{$chr}->{'40'})));
             $rh_qual_stats->{$chr}->{'90'} = 0 if (! (defined ($rh_qual_stats->{$chr}->{'90'})));
             $rh_qual_stats->{$chr}->{'total'}++;
-            $rh_qual_stats->{$chr}->{'60'}++ if ($score>=60);;
+            $rh_qual_stats->{'total'}->{'total'}++;
+            $rh_qual_stats->{$chr}->{'40'}++ if ($score>=40);;
             $rh_qual_stats->{$chr}->{'90'}++ if ($score>=90);;
+            $rh_qual_stats->{'total'}->{'40'}++ if ($score>=40);;
+            $rh_qual_stats->{'total'}->{'90'}++ if ($score>=90);;
         }
     }
     close STATES;
@@ -509,15 +513,24 @@ sub calc_stats_file {
     open STATS, ">$stats_file"
         or die "Couldn\'t open $stats_file for writing: $!\n";
 
-    print STATS "Chrom\tTotalSites\tPercent60orAbove\tPercent90orAbove\n";
-    foreach my $chr (sort {$rh_qual_stats->{$b}->{'60'}/$rh_qual_stats->{$b}->{'total'} <=> 
-                    $rh_qual_stats->{$a}->{'60'}/$rh_qual_stats->{$a}->{'total'}} keys %all_chroms) {
+    print STATS "Chrom\tTotalSites\tPercent40orAbove\tPercent90orAbove\n";
+    foreach my $chr (sort {$rh_qual_stats->{$b}->{'40'}/$rh_qual_stats->{$b}->{'total'} <=> 
+                    $rh_qual_stats->{$a}->{'40'}/$rh_qual_stats->{$a}->{'total'}} keys %all_chroms) {
         my $total_points = $rh_qual_stats->{$chr}->{'total'};
-        my $perc60 = int(1000*$rh_qual_stats->{$chr}->{'60'}/$total_points)/10;
+        my $perc40 = int(1000*$rh_qual_stats->{$chr}->{'40'}/$total_points)/10;
         my $perc90 = int(1000*$rh_qual_stats->{$chr}->{'90'}/$total_points)/10;
 
-        print STATS "$chr\t$total_points\t$perc60\t$perc90\n";
+        print STATS "$chr\t$total_points\t$perc40\t$perc90\n";
     }
+    # print overall statistics:
+
+    my $total_total = $rh_qual_stats->{'total'}->{'total'};
+    my $total_40 = $rh_qual_stats->{'total'}->{'40'};
+    my $total_90 = $rh_qual_stats->{'total'}->{'90'};
+    my $total_perc40 = int(1000*$total_40/$total_total)/10;
+    my $total_perc90 = int(1000*$total_90/$total_total)/10;
+    print STATS "overall\t$total_total\t$total_perc40\t$total_perc90\n";
+
     close STATS;
 
     return $stats_file;
@@ -544,7 +557,7 @@ source("$plotstates_rlib");
 
 states <- read_states("$state_file");
 
-states60 <- states[states\$score >= 60, ];
+states40 <- states[states\$score >= 40, ];
 chroms <- unique(states\$chr);
 
 for (thischr in chroms) {
@@ -554,12 +567,12 @@ for (thischr in chroms) {
     dev.off();
 }
 
-chromshq <- unique(states60\$chr);
+chromshq <- unique(states40\$chr);
 
 for (thischr in chromshq) {
     file = paste("$workdir/plots/", thischr, ".hq.png", sep="");
     png(file);
-    plot_states(states60, thischr, muratio=$muratio, contam=$contam);
+    plot_states(states40, thischr, muratio=$muratio, contam=$contam);
     dev.off();
 }
 
@@ -611,7 +624,8 @@ sub run_commands {
             }
         }
         else {
-            system($cmd);
+            system($cmd) == 0
+                or die "Something went wrong running $cmd\n";
         }
     }
     if ($Opt{'sge'}) { # wait for submitted jobs to finish
@@ -699,7 +713,15 @@ Specify the path of the reference fasta file to which reads from the BAM files a
 
 =item B<--mindepth>
 
-Specify the minimum total depth of coverage required to included a heterozygous site in the observables written to the observable file (default 0).
+Specify the minimum total depth of coverage required to include a heterozygous site in the observables written to the observable file (default 0).
+
+=item B<--minnormaldepth>
+
+Specify the minimum normal depth of coverage required to include a heterozygous site in the observables written to the observable file (default 0).
+
+=item B<--mintumordepth>
+
+Specify the minimum tumor depth of coverage required to include a heterozygous site in the observables written to the observable file (default 0).
 
 =item B<--maxcopies>
 
@@ -716,10 +738,6 @@ Do not optimize the state transition probabilities using Baum-Welch.  Often, all
 =item B<--sigratio>
 
 Specify the starting value for the standard deviation of the (Gaussian distributed) ratio of depth of coverage in the tumor sequence to depth of coverage in the normal sequence (default 3.00).
-
-=item B<--sigpi>
-
-Specify the starting value for the standard deviation of the (Gaussian distributed) proportion of alternate allele in the tumor sequence (default 0.15).
 
 =item B<--contam>
 

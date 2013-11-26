@@ -1,3 +1,6 @@
 c/*.o
 scratch
 scratch/*
+t/calltest*
+t/test1out
+t/test1out/*

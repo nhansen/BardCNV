@@ -1,0 +1,117 @@
+BARDCNV(1)            User Contributed Perl Documentation           BARDCNV(1)
+
+
+
+NAME
+       bardCNV.pl - given a file of heterozygous positions (in a normal
+       diploid sample), set the parameters and solve for the states of a hid-
+       den Markov model to predict copy number state in a matched tumor sam-
+       ple.
+
+SYNOPSIS
+         bardCNV.pl --normalbam <bam file from normal sample> --tumorbam <bam file from tumor> --ref <reference fasta> --hetfile <BED formatted file of positions heterozygous in the normal>
+         bardCNV.pl --trio --mombam <bam file from mother's sample> --dadbam <bam file from father's sample> --childbam <bam file from child>
+
+DESCRIPTION
+       Using B-allele frequencies within sequence from a tumor sample, and the
+       depth of coverage of the tumor compared to normal sequencing read
+       depth, bardCNV.pl predicts copy number (including the copy counts of
+       both alleles) using an HMM trained on these two features.  The program
+       requires a list of high-confidence sites which are believed to be
+       diploid and heterozygous in the normal sample.  For these sites, the
+       B-allele frequency in the tumor sample helps bardCNV to pin down the
+       ratio of the major to minor copy number allele, and thus helps to
+       determine the overall ploidy, and optionally, the purity level of the
+       tumor sample.
+
+OPTIONS
+       --normalbam
+           Specify the path of a BAM file containing the aligned sequence data
+           from the normal sample (required).
+
+       --tumorbam
+           Specify the path of a BAM file containing the aligned sequence data
+           from the tumor sample (required).
+
+       --ref
+           Specify the path of the reference fasta file to which reads from
+           the BAM files are aligned (required).
+
+       --mindepth
+           Specify the minimum total depth of coverage required to included a
+           heterozygous site in the observables written to the observable file
+           (default 0).
+
+       --maxcopies
+           Specify the maximum total number of copies to use in the training
+           step (limits memory and CPU usage) (default 12, maximum 16).
+
+       --transprob
+           Specify the starting value for the transition probability between
+           different states (which is constrained to be the same for all
+           inter-state transitions (default 0.0001).  To fix the transition
+           probability so that it is not optimized using Baum-Welch, use the
+           "--fixedtrans" option.
+
+       --fixedtrans
+           Do not optimize the state transition probabilities using
+           Baum-Welch.  Often, allowing the transition probability to vary
+           will result in overfitting of the model with an overly-large tran-
+           sition probability, allowing the introduction of small artifactual
+           copy number changes to increase the likelihood of data that doesn't
+           conform to the overly-simplistic Gaussian model.
+
+       --sigratio
+           Specify the starting value for the standard deviation of the (Gaus-
+           sian distributed) ratio of depth of coverage in the tumor sequence
+           to depth of coverage in the normal sequence (default 3.00).
+
+       --contam
+           Specify the percentage contamination of the tumor tissue which is
+           estimated to actually be unaffected (default 0.01).
+
+       --optcontam
+           Train the model for a range of contamination values, then output
+           states for the optimal model at the optimal contamination.
+
+       --mincontam
+           If using --optcontam option, this is the minimum value of the con-
+           tamination parameter to test (default 0.01).  Note: if any value
+           less then 0.01 is specified, 0.01 will be used.
+
+       --maxcontam
+           If using --optcontam option, this is the maximum value of the con-
+           tamination parameter to test (default 0.50).  Note: if any value
+           greater than 0.99 is specified, 0.99 will be used.
+
+       --male
+           Omit any chromosome containing the character "X" in the training
+           step (this is because sites, at least in the non-PAR regions of X
+           for a male, cannot be heterozygous.
+
+AUTHOR
+        Nancy F. Hansen - nhansen@mail.nih.gov
+
+LEGAL
+       This software/database is "United States Government Work" under the
+       terms of the United States Copyright Act.  It was written as part of
+       the authors' official duties for the United States Government and thus
+       cannot be copyrighted.  This software/database is freely available to
+       the public for use without a copyright notice.  Restrictions cannot be
+       placed on its present or future use.
+
+       Although all reasonable efforts have been taken to ensure the accuracy
+       and reliability of the software and data, the National Human Genome
+       Research Institute (NHGRI) and the U.S. Government does not and cannot
+       warrant the performance or results that may be obtained by using this
+       software or data.  NHGRI and the U.S.  Government disclaims all war-
+       ranties as to performance, merchantability or fitness for any particu-
+       lar purpose.
+
+       In any work or product derived from this material, proper attribution
+       of the authors as the source of the software or data should be made,
+       using "NHGRI Genome Technology Branch" as the citation.
+
+
+
+perl v5.8.8                       2013-09-24                        BARDCNV(1)

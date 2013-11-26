@@ -5,7 +5,7 @@
 
 EXES=bardcnv
 OBJS=	\
-		main.o params.o readin.o viterbi.o probabilities.o printout.o baumwelch.o forward.o backward.o plots.o precision.o memory.o
+		main.o params.o readin.o viterbi.o probabilities.o printout.o baumwelch.o forward.o backward.o plots.o precision.o memory.o bamcounts.o
 
 SRCS= $(OBJS:.o=.c)
 CC = gcc

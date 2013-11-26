@@ -29,6 +29,7 @@ double **alloc_double_matrix(int rows, int cols) {
     int i;
     double **matrix;
 
+    /* this routine will allocate rows*cols doubles and rows pointers to doubles */
     matrix = (double **)malloc(sizeof(double *) * rows); 
     if (!matrix) {
         fprintf(stderr, "Couldn't allocate memory!\n");
@@ -61,6 +62,7 @@ double ***alloc_double_tensor(int rows, int cols, int levels) {
     int i, j;
     double ***tensor;
 
+    /* this routine will allocate rows*cols*levels doubles */
     tensor = (double ***)malloc(sizeof(double **) * rows); 
     if (!tensor) {
         fprintf(stderr, "Couldn't allocate memory!\n");

@@ -1,0 +1,32 @@
+BardCNV
+
+BardCNV is a program designed to identify copy number alterations when run on two BAM 
+files for two different samples from the same individual.  BardCNV models read counts from
+the two alleles of heterozygous SNP sites in both the altered and unaltered samples to
+infer copy number changes using a hidden Markov model (HMM).
+
+BardCNV was written by Nancy Fisher Hansen, a staff scientist in the Genome Technology 
+Branch (GTB) of NHGRI, an institute at the National Institutes of Health.  Nancy can be 
+reached at nhansen@mail.nih.gov.
+
+Build Dependencies
+
+* git
+* samtools 0.1.16 or above
+* R 1.6.1 or above
+
+Build Instructions
+
+Clone the BardCNV repository:
+
+git clone git://github.com/nhansen/BardCNV.git
+
+Build BardCNV:
+
+cd BardCNV
+perl Build.PL
+./Build
+./Build test
+./Build install
+
+* For local installation, call perl Build.PL with "--install_base $HOME"
