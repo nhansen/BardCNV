@@ -122,7 +122,7 @@ void run_viterbi(ModelParams *model_params, Observation *observations, int *stat
     for (t = 0; t < model_params->T; t++) {
         index = state_indices[t];
         state_probabilities[t] = gamma[t][index];
-        fprintf(stderr, "time %ld probability %lf for state %d\n", t, state_probabilities[t], index);
+        /* fprintf(stderr, "time %ld probability %lf for state %d\n", t, state_probabilities[t], index); */
     }
 
     free_double_matrix(eprob, model_params->T);

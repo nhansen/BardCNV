@@ -83,6 +83,10 @@ sub process_commandline {
     elsif (!$Opt{'normalbam'} || !$Opt{'tumorbam'} || !$Opt{'ref'} || !$Opt{'hetfile'}) {
         die "Options --normalbam, --tumorbam, --hetfile, and --ref are required!\n";
     }
+
+    if (!(-r($Opt{'hetfile'}))) {
+        die "Het file $Opt{'hetfile'} is not readable!\n";
+    }
     if ($Opt{'optcontam'}) {
         if ($Opt{'mincontam'} < 0.01) {
            $Opt{'mincontam'} = 0.01;
