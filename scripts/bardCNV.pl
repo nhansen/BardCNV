@@ -715,6 +715,10 @@ Specify the path of a BAM file containing the aligned sequence data from the tum
 
 Specify the path of the reference fasta file to which reads from the BAM files are aligned (required).
 
+=item B<--hetfile>
+
+Specify the path of a bed file with positions known to be heterozygous in the normal sample.  Ideally, these heterozygous sites are obtained by running a genotyping program on the normal bam file (required).
+
 =item B<--mindepth>
 
 Specify the minimum total depth of coverage required to include a heterozygous site in the observables written to the observable file (default 0).
