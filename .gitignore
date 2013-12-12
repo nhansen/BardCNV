@@ -5,3 +5,9 @@ t/calltest*
 t/test1out
 t/test1out/*
 Build
+_build
+_build/*
+_build/*/*
+blib
+blib/*
+blib/*/*
