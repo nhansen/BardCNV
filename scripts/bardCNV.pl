@@ -54,15 +54,15 @@ if ($Opt{'plots'}) {
 sub process_commandline {
     # Set defaults here
     %Opt = ( mindepth => 0 , maxcopies => 8, transprob => 0.0001, countopts => '',
-             minnormaldepth => 0, mintumordepth => 0,
+             minnormaldepth => 0, mintumordepth => 0, minvcfscore => 10,
              sigratio => 3.00, contam => 0.01, maxviterbicopies => 24,
              mincontam => 0.01, maxcontam => 0.5 );
     GetOptions(
         \%Opt, qw(
             manual help+ version normalbam=s tumorbam=s ref=s
-            outdir=s hetfile=s mindepth=i maxcopies=i 
-            minnormaldepth=i mintumordepth=i
-            transprob=f countopts=s trio fixedtrans
+            outdir=s hetfile=s fillfile=s mindepth=i maxcopies=i 
+            minnormaldepth=i mintumordepth=i minvcfscore=i
+            transprob=f countopts=s trio vartrans
             mombam=s dadbam=s childbam=s male diploid
             sigratio=f contam=f optcontam mincontam=i
             maxcontam=i skipcounts skipobs 
@@ -125,6 +125,7 @@ sub create_observable_files {
 
     my $train_obs_file = "$workdir/train_obs.txt";
     my $viterbi_obs_file = "$workdir/viterbi_obs.txt";
+    my $allsitefile = "$workdir/allsites.bed";
 
     if ($Opt{'skipobs'}) {
         if (!(-e $train_obs_file) || !(-e $viterbi_obs_file)) {
@@ -132,6 +133,11 @@ sub create_observable_files {
         }
         return ($train_obs_file, $viterbi_obs_file);
     }
+
+    my $rh_hetsites = ($Opt{'hetfile'}) ? read_bedsites($Opt{'hetfile'}) : {};
+    my $rh_fillsites = ($Opt{'fillfile'}) ? read_bedsites($Opt{'fillfile'}) : {};
+
+    $allsitefile = write_allsites($allsitefile, $rh_fillsites, $rh_hetsites);
 
     if ($Opt{'skipcounts'}) {
         if (!(-e "$workdir/normalbam.counts") || !(-e "$workdir/tumorbam.counts")) {
@@ -142,7 +148,7 @@ sub create_observable_files {
         my @count_commands = ();
         my @bam_files = ($Opt{'trio'}) ? ('mombam', 'dadbam', 'childbam') : ('normalbam', 'tumorbam');
         foreach my $fileopt (@bam_files) {
-            my $cmd = "bardcnv bamcounts -fasta $Opt{ref} -bam $Opt{$fileopt} -bedfile $Opt{hetfile} $Opt{countopts} > $workdir/$fileopt.counts";
+            my $cmd = "bardcnv bamcounts -fasta $Opt{ref} -bam $Opt{$fileopt} -bedfile $allsitefile $Opt{countopts} > $workdir/$fileopt.counts";
             push @count_commands, $cmd;
         }
         run_commands(\@count_commands, '-o' => "$workdir",
@@ -163,6 +169,7 @@ sub create_observable_files {
         while (<NORM>) {
             if (/^(\S+)\s(\d+)\s(\S)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)$/) {
                 my ($chr, $pos, $ref, $A_count, $T_count, $G_count, $C_count, $a_count, $t_count, $g_count, $c_count) = ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
+                $ref = uc($ref);
                 next if ($ref !~ /[ATGC]/);
                 my %base_counts = ();
                 $base_counts{'A'} = $A_count + $a_count;
@@ -201,6 +208,7 @@ sub create_observable_files {
     while (<TUMOR>) {
         if (/^(\S+)\s(\d+)\s(\S)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)$/) {
             my ($chr, $pos, $ref, $A_count, $T_count, $G_count, $C_count, $a_count, $t_count, $g_count, $c_count) = ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
+            $ref = uc($ref);
             next if ($ref !~ /[ATGC]/);
             my %base_counts = ();
             $base_counts{'A'} = $A_count + $a_count;
@@ -239,7 +247,9 @@ sub create_observable_files {
             next if ($normal_reads < $Opt{'minnormaldepth'});
             next if ($tumor_reads < $Opt{'mintumordepth'});
             next if (!$normal_reads);
-            my $alt_count = ($rh_alt_count->{$chr} && defined($rh_alt_count->{$chr}->{$pos})) ? $rh_alt_count->{$chr}->{$pos} : 0;
+
+            # if an alt count has been recorded, print it, but if this is not a het site or there is zero tumor coverage, use -1:
+            my $alt_count = ($rh_alt_count->{$chr} && defined($rh_alt_count->{$chr}->{$pos})) ? $rh_alt_count->{$chr}->{$pos} : -1;
             if ((!@omit_entries || !grep {$_ eq $chr} @omit_entries) && ($chr !~ /X/ || !$Opt{'male'} )) {
                 print TRAINOBS "$chr\t$pos\t$normal_reads\t$tumor_reads\t$alt_count\n";
             }
@@ -303,7 +313,7 @@ sub train_model {
                 }
                 write_train_start_file("$workdir/train_$muratio_string\_$contamval/train_start.txt", $muratio, $contamval); 
                 my $maxratio_opt = $ratio_avg * 4.0;
-                my $fix_opt = ($Opt{'fixedtrans'}) ? '-fixtrans' : '';
+                my $fix_opt = ($Opt{'vartrans'}) ? '' : '-fixtrans';
                 my $verbose_opt = ($Opt{'verbose'}) ? '-verbose' : '';
                 my $train_cmd = "bardcnv baumwelch -derivatives -obsfile $obs_file -modelfile $workdir/train_$muratio_string\_$contamval/train_start.txt $fix_opt $verbose_opt -maxratio $maxratio_opt > $workdir/train_$muratio_string\_$contamval/train.out 2>$workdir/train_$muratio_string\_$contamval/train.err";
                 push @train_commands, $train_cmd;
@@ -481,6 +491,9 @@ sub write_vcf {
     }
 
     my $cmd = "bard2vcf.pl --obs $obs_file --states $state_file --ref $Opt{'ref'} --sample1 NORMAL --sample2 TUMOR --outfile $vcf_file";
+    if ($Opt{'minvcfscore'}) {
+        $cmd .= " --min_score $Opt{'minvcfscore'}";
+    }
     run_command($cmd, '-o' => $workdir, '-e' => $workdir);
 
     return $vcf_file;
@@ -584,6 +597,57 @@ DOC
 
     my $cmd = "R --file=$r_cmd_file";
     run_command($cmd, '-o' => $workdir, '-e' => $workdir);
+}
+
+sub read_bedsites {
+    my $bedfile = shift;
+    my %bedhash = ();
+
+    open BED, $bedfile
+        or die "Couldn\'t open $bedfile for reading: $!\n";
+
+    while (<BED>) {
+        if (/^(\S+)\s(\d+)\s(\d+)/) { # bed coordinate line
+            my ($chr, $start, $end) = ($1, $2, $3);
+
+            for (my $pos = $start + 1; $pos <= $end; $pos++) {
+                $bedhash{$chr}->{$pos} = 1;
+            }
+        }
+    }
+    close BED;
+
+    return {%bedhash};
+}
+
+sub write_allsites {
+    my $allsitefile = shift;
+    my @hashrefs = @_;
+
+    my $rh_allsites = {};
+    foreach my $rh_sites (@hashrefs) {
+        foreach my $chr (keys %{$rh_sites}) {
+            foreach my $pos (keys %{$rh_sites->{$chr}}) {
+                $rh_allsites->{$chr}->{$pos} = 1;
+            }
+        }
+    }
+
+    # now write out sites in order:
+
+    open ALLSITES, ">$allsitefile"
+        or die "Couldn\'t open $allsitefile for writing: $!\n";
+
+    foreach my $chr (sort keys %{$rh_allsites}) {
+        foreach my $pos (sort {$a <=> $b} keys %{$rh_allsites->{$chr}}) {
+            my $pmo = $pos - 1;
+            print ALLSITES "$chr\t$pmo\t$pos\n";
+        }
+    }
+
+    close ALLSITES;
+
+    return $allsitefile;
 }
 
 sub run_command {
@@ -719,6 +783,10 @@ Specify the path of the reference fasta file to which reads from the BAM files a
 
 Specify the path of a bed file with positions known to be heterozygous in the normal sample.  Ideally, these heterozygous sites are obtained by running a genotyping program on the normal bam file (required).
 
+=item B<--fillfile>
+
+Specify the path of a bed file with positions NOT known to be heterozygous in the normal sample.  These sites' read depth values in the normal and the tumor sample are used, without any affect on the model's probabilities due to B-allele frequency.
+
 =item B<--mindepth>
 
 Specify the minimum total depth of coverage required to include a heterozygous site in the observables written to the observable file (default 0).
@@ -737,11 +805,11 @@ Specify the maximum total number of copies to use in the training step (limits m
 
 =item B<--transprob>
 
-Specify the starting value for the transition probability between different states (which is constrained to be the same for all inter-state transitions (default 0.0001).  To fix the transition probability so that it is not optimized using Baum-Welch, use the "--fixedtrans" option.
+Specify the value of the transition probability between different states, or the starting value for this transition probability if the --vartrans option is specified (default 0.0001).
 
-=item B<--fixedtrans>
+=item B<--vartrans>
 
-Do not optimize the state transition probabilities using Baum-Welch.  Often, allowing the transition probability to vary will result in overfitting of the model with an overly-large transition probability, allowing the introduction of small artifactual copy number changes to increase the likelihood of data that doesn't conform to the overly-simplistic Gaussian model.
+Optimize the state transition probabilities using Baum-Welch.  Often, allowing the transition probability to vary will result in overfitting of the model with an overly-large transition probability, allowing the introduction of small artifactual copy number changes to increase the likelihood of data that doesn't conform to the overly-simplistic Gaussian/binomial model.
 
 =item B<--sigratio>
 

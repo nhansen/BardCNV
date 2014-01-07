@@ -268,26 +268,31 @@ void calc_bprobs(ModelParams *model_params, Observation *observations, double **
         for (t=0; t < model_params->T; t++) {
             tumordepth = (&(observations[t]))->tumortotaldepth;
             altdepth = (&(observations[t]))->tumoraltdepth;
-            
-            binprob(altdepth, tumordepth, propeff[i], &bbinaryprob);
-            binprob(altdepth, tumordepth, 1.0 - propeff[i], &abinaryprob);
-
-            /* fprintf(stderr, "Calculated probs %lf %lf for depth %d out of %d with prob %lf\n", bbinaryprob, abinaryprob, altdepth, tumordepth, propeff[i]); */
-            bprob[t][i] = 0.5*(abinaryprob + bbinaryprob);
-            if (isnan(bprob[t][i])) {
-                fprintf(stderr, "bprob is not a number at t=%ld, state %d!\n", t, i);
-                exit(1);
+     
+            if (altdepth == -1) {
+                bprob[t][i] = 1.0;
             }
-            if (bprob[t][i] <= 0.00001) {
-                if ( parameters->verbose != 0 ) {
-                    fprintf(stderr, "Setting bprob to 0.00001 at %ld for state %d, tumoralt %ld, tumortotal %ld (prop=%lf)\n", t, i, altdepth, tumordepth, propeff[i]);
+            else {       
+                binprob(altdepth, tumordepth, propeff[i], &bbinaryprob);
+                binprob(altdepth, tumordepth, 1.0 - propeff[i], &abinaryprob);
+    
+                /* fprintf(stderr, "Calculated probs %lf %lf for depth %d out of %d with prob %lf\n", bbinaryprob, abinaryprob, altdepth, tumordepth, propeff[i]); */
+                bprob[t][i] = 0.5*(abinaryprob + bbinaryprob);
+                if (isnan(bprob[t][i])) {
+                    fprintf(stderr, "bprob is not a number at t=%ld, state %d!\n", t, i);
+                    exit(1);
                 }
-                bprob[t][i] = 0.00001;
-
-            }
-            if (bprob[t][i] > 1.0) {
-                fprintf(stderr, "bprob is greater than 1.0 at t=%ld, state %d (tumor %ld, normal %ld, prop %lf) probability; %lf!\n", t, i, tumordepth, altdepth, propeff[i], bprob[t][i]);
-                exit(1);
+                if (bprob[t][i] <= 0.00001) {
+                    if ( parameters->verbose != 0 ) {
+                        fprintf(stderr, "Setting bprob to 0.00001 at %ld for state %d, tumoralt %ld, tumortotal %ld (prop=%lf)\n", t, i, altdepth, tumordepth, propeff[i]);
+                    }
+                    bprob[t][i] = 0.00001;
+    
+                }
+                if (bprob[t][i] > 1.0) {
+                    fprintf(stderr, "bprob is greater than 1.0 at t=%ld, state %d (tumor %ld, normal %ld, prop %lf) probability; %lf!\n", t, i, tumordepth, altdepth, propeff[i], bprob[t][i]);
+                    exit(1);
+                }
             }
         }
 
